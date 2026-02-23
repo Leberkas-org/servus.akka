@@ -14,7 +14,7 @@ public record BindTcp(
     Channel<(IMemoryOwner<byte> buffer, int readableBytes)>? InboundChannel = null,
     Channel<(IMemoryOwner<byte> buffer, int readableBytes)>? OutboundChannel = null);
 
-public record TcpConnected(
+public record TcpClientConnected(
     EndPoint RemoteEndPoint,
     ChannelReader<(IMemoryOwner<byte> buffer, int readableBytes)> InboundReader,
     ChannelWriter<(IMemoryOwner<byte> buffer, int readableBytes)> OutboundWriter);

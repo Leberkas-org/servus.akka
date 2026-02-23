@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using System.Net.Sockets;
 using System.Threading.Channels;
 
 namespace Servus.Akka.IO;
@@ -7,6 +8,7 @@ namespace Servus.Akka.IO;
 internal sealed class TcpClientState
 {
     public int MaxFrameSize { get; }
+    public NetworkStream Stream { get; }
 
     private readonly Channel<(IMemoryOwner<byte> buffer, int readableBytes)> _inboundChannel;
     private readonly Channel<(IMemoryOwner<byte> buffer, int readableBytes)> _outboundChannel;
@@ -19,6 +21,7 @@ internal sealed class TcpClientState
     public Pipe Pipe { get; }
 
     public TcpClientState(int maxFrameSize,
+        NetworkStream stream,
         Channel<(IMemoryOwner<byte> buffer, int readableBytes)>? inboundChannel,
         Channel<(IMemoryOwner<byte> buffer, int readableBytes)>? outboundChannel)
     {
@@ -26,6 +29,7 @@ internal sealed class TcpClientState
         _outboundChannel = outboundChannel ?? Channel.CreateUnbounded<(IMemoryOwner<byte> buffer, int readableBytes)>();
         
         MaxFrameSize = maxFrameSize;
+        Stream = stream;
         Pipe = new Pipe(new PipeOptions(pauseWriterThreshold: GetBufferSize(),
             resumeWriterThreshold: GetBufferSize() / 2,
             useSynchronizationContext: false));
