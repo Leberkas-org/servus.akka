@@ -5,7 +5,7 @@
 [![NuGet](https://img.shields.io/nuget/v/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
 [![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://docs.leberkas.org/servusakka)
 [![License](https://img.shields.io/github/license/Bavaria-Black/servus.akka?style=flat-square)](LICENSE)
-[![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Core/)
+[![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
 
 
 ## Overview
