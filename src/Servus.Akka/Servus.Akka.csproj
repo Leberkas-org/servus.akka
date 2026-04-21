@@ -31,7 +31,7 @@
 
     <ItemGroup>
         <None Include="../../README.md" Pack="true" Visible="false" PackagePath="\"/>
-        <None Include="../../logo.png" Pack="true" Visible="false" PackagePath="\"/>
+        <None Include="../../docs/public/logo.png" Pack="true" Visible="false" PackagePath="\"/>
         <None Include="../../LICENSE" Pack="true" Visible="false" PackagePath="\"/>
     </ItemGroup>
 

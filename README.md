@@ -2,11 +2,11 @@
 
 > An Akka.NET quality of life extension library. Filled with features that you didn't know you actually missed ;)
 
-![Image](https://raw.githubusercontent.com/Bavaria-Black/servus.akka/refs/heads/main/logo_servus.png)
+[![NuGet](https://img.shields.io/nuget/v/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
+[![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://docs.leberkas.org/servusakka)
+[![License](https://img.shields.io/github/license/Bavaria-Black/servus.akka?style=flat-square)](LICENSE)
+[![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Core/)
 
-[![NuGet](https://img.shields.io/nuget/v/Servus.Akka.svg)](https://www.nuget.org/packages/Servus.Akka/)
-[![License](https://img.shields.io/github/license/Bavaria-Black/servus.akka)](LICENSE)
-[![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg)](https://www.nuget.org/packages/Servus.Akka/)
 
 ## Overview
 
@@ -62,16 +62,15 @@ var a = Host.Services.GetService<IActorRef<ResolvingTestActor>>();
         a.Tell("hello");
 ```
 
-##
-
-
 ## Documentation
 
-- **[Getting Started Guide](docs/getting-started.md)** - Your first steps with Servus.Akka
-- **[API Reference](docs/api-reference.md)** - Detailed API documentation  
-- **[Examples](docs/examples/)** - Real-world usage examples
-- **[Migration Guide](docs/migration.md)** - Upgrading from previous versions
-- **[Best Practices](docs/best-practices.md)** - Recommended patterns and practices
+- **[Documentation Home](docs/index.md)** - Overview of all modules and links
+- **[Getting Started Guide](docs/getting-started.md)** - First steps with Servus.Akka
+- **[Extensions](docs/modules/extensions/)** - Resolve/Register/Registry/Context/Akka options
+- **[Dependency Injection](docs/modules/dependency-injection/)** - `ActorRef<TActor>` and DI provider integration
+- **[Diagnostics](docs/modules/diagnostics/)** - Traced messaging and actor instrumentation
+- **[Messaging](docs/modules/messaging/)** - Envelope contracts for traced payloads
+- **[Startup](docs/modules/startup/)** - Startup containers for Akka system setup
 
 ## Compatibility
 
