@@ -61,7 +61,7 @@ public class ContextExtensionTests : TestKit
     {
         var actor = Sys.ResolveActor<TestParentActor>(Nobody.Instance);
         actor.Tell(555);
-        ExpectMsg("hello");
+        ExpectMsg("hello", cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -69,7 +69,7 @@ public class ContextExtensionTests : TestKit
     {
         var actor = Sys.ResolveActor<TestParentActor>(Nobody.Instance);
         actor.Tell(new SimpleTracedMessage("hello", true));
-        ExpectMsg("hello");
+        ExpectMsg("hello", cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -79,7 +79,7 @@ public class ContextExtensionTests : TestKit
         var actor = Sys.ResolveActor<TestParentActor>(a);
         actor.Tell(555f);
 
-        a.ExpectMsg(true);
+        a.ExpectMsg(true, cancellationToken: TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public class ContextExtensionTests : TestKit
         var a = CreateTestProbe("test");
         var actor = Sys.ResolveActor<TestParentActor>(a);
         actor.Tell(new SimpleTracedMessage("hello"));
-        a.ExpectMsg(true);
+        a.ExpectMsg(true, cancellationToken: TestContext.Current.CancellationToken);
     }
 
     protected override void ConfigureAkka(AkkaConfigurationBuilder builder, IServiceProvider provider)

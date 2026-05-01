@@ -75,7 +75,7 @@ public class TracedActorTests : TestKit
         var actor = Sys.ResolveActor<TracedPongActor>();
         actor.TellTraced(new TracedMessage("ping"));
 
-        ExpectMsg<TracedMessage>();
+        ExpectMsg<TracedMessage>(cancellationToken: TestContext.Current.CancellationToken);
         var msg = (TracedMessage) LastMessage;
 
         Assert.NotNull(msg.TraceId);
