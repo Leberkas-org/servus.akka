@@ -9,6 +9,7 @@ env:
   GLOBAL_JSON_PATH: './src/global.json'
   PROJECT_PATH: './src/Servus.Akka.sln'
   PACKAGE_OUTPUT_DIRECTORY: './packages'
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
 jobs:
   build:
@@ -52,16 +53,17 @@ jobs:
 
       - name: start sonar scanner
         if: ${{ env.SONAR_TOKEN && env.SONAR_TOKEN != '' }}
-        run: dotnet sonarscanner begin /o:"bavaria-black" /k:"servus-core" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="$SONAR_TOKEN" /d:sonar.cs.vscoveragexml.reportsPaths=src/TestResults/*.xml
+        run: dotnet sonarscanner begin /o:"bavaria-black" /k:"servus-akka" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="$SONAR_TOKEN" /d:sonar.cs.vscoveragexml.reportsPaths=src/TestResults/*.xml
 
       - name: Build
         run: dotnet build --configuration Release --no-restore ${{ env.PROJECT_PATH }} /p:Version=${{ steps.gitversion.outputs.semVer }}
 
       - name: Run tests
         working-directory: './src'
-        run: dotnet test --configuration Release --no-ansi --no-build --coverage --coverage-output-format xml --solution Servus.sln --results-directory ./TestResults
+        run: dotnet test --configuration Release --no-ansi --no-build --coverage --coverage-output-format xml --solution *.sln --results-directory ./TestResults
 
       - name: stop sonar scanner
+        if: ${{ env.SONAR_TOKEN && env.SONAR_TOKEN != '' }}
         run: dotnet sonarscanner end /d:sonar.token="${{ secrets.SONAR_TOKEN }}"
         
       - name: Create NuGet package
