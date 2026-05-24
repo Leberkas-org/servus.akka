@@ -38,7 +38,7 @@ app.MapGet("/counters/{id}", async (string id, ActorSystem system) =>
     if (!LocalEntityRegionActor.IsValidEntityId(id))
         return Results.BadRequest(new { error = $"Invalid entity ID '{id}'" });
 
-    var region = system.GetActor<CounterActor>();
+    var region = await system.GetActorAsync<CounterActor>();
     var result = await region.Ask<CounterValue>(new GetCount(id), TimeSpan.FromSeconds(5));
     return Results.Ok(result);
 });
@@ -48,7 +48,7 @@ app.MapPost("/counters/{id}/increment", async (string id, ActorSystem system) =>
     if (!LocalEntityRegionActor.IsValidEntityId(id))
         return Results.BadRequest(new { error = $"Invalid entity ID '{id}'" });
 
-    var region = system.GetActor<CounterActor>();
+    var region = await system.GetActorAsync<CounterActor>();
     var result = await region.Ask<CounterValue>(new Increment(id), TimeSpan.FromSeconds(5));
     return Results.Ok(result);
 });
@@ -58,7 +58,7 @@ app.MapPost("/counters/{id}/decrement", async (string id, ActorSystem system) =>
     if (!LocalEntityRegionActor.IsValidEntityId(id))
         return Results.BadRequest(new { error = $"Invalid entity ID '{id}'" });
 
-    var region = system.GetActor<CounterActor>();
+    var region = await system.GetActorAsync<CounterActor>();
     var result = await region.Ask<CounterValue>(new Decrement(id), TimeSpan.FromSeconds(5));
     return Results.Ok(result);
 });
@@ -75,4 +75,4 @@ app.MapGet("/logs", async (HttpContext ctx, CancellationToken ct) =>
     }
 });
 
-app.Run();
+await app.RunAsync();

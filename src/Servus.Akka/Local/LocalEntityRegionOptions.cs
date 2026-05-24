@@ -4,4 +4,5 @@ public class LocalEntityRegionOptions
 {
     public TimeSpan? PassivateIdleEntityAfter { get; set; }
     public IEntityIdStore? EntityIdStore { get; set; }
+    public TimeProvider? TimeProvider { get; set; }
 }
