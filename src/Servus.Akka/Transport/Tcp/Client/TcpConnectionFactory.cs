@@ -20,8 +20,7 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
             remoteEndPoint = tlsProvider.RemoteEndPoint;
             protocol = TransportProtocol.Tls;
 
-            if (tlsProvider.NegotiatedSslProtocol is { } sslProto
-                && tlsProvider.NegotiatedApplicationProtocol is { } appProto)
+            if (tlsProvider is { NegotiatedSslProtocol: { } sslProto, NegotiatedApplicationProtocol: { } appProto })
             {
                 security = new SecurityInfo(sslProto, appProto);
             }

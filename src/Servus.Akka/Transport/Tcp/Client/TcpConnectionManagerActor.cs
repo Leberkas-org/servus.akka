@@ -21,9 +21,8 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
         public static readonly Evict Instance = new();
     }
 
-    private sealed class HostState(TransportOptions options, TcpPoolConfig config)
+    private sealed class HostState(TcpPoolConfig config)
     {
-        public readonly TransportOptions Options = options;
         public readonly TcpPoolConfig Config = config;
         public readonly List<ConnectionLease> Leases = [];
         public readonly Queue<ConnectionLease> Idle = new();
@@ -73,8 +72,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
     protected override void PreStart()
     {
-        Timers.StartPeriodicTimer(EvictTimerKey, Evict.Instance,
-            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        Timers.StartPeriodicTimer(EvictTimerKey, Evict.Instance, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
     }
 
     private void OnAcquire(Acquire msg)
@@ -90,7 +88,8 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
             {
                 if (msg.Tcs.TrySetResult(idle))
                 {
-                    Tracing.For("Pool").Debug(this, "Reused idle connection to {0}:{1}", msg.Options.Host, msg.Options.Port);
+                    Tracing.For("Pool").Debug(this, "Reused idle connection to {0}:{1}", msg.Options.Host,
+                        msg.Options.Port);
                     return;
                 }
             }
@@ -166,7 +165,8 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
             host.Establishing--;
         }
 
-        Tracing.For("Pool").Warning(this, "Failed to {0}:{1}: {2}", msg.Original.Options.Host, msg.Original.Options.Port, msg.Ex.Message);
+        Tracing.For("Pool").Warning(this, "Failed to {0}:{1}: {2}", msg.Original.Options.Host,
+            msg.Original.Options.Port, msg.Ex.Message);
 
         if (msg.Ex is OperationCanceledException oce)
         {
@@ -250,12 +250,14 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
     private HostState GetOrCreateHost(TransportOptions options)
     {
-        if (!_hosts.TryGetValue(options, out var state))
+        if (_hosts.TryGetValue(options, out var state))
         {
-            var config = _registry.Resolve(options.PoolKey);
-            state = new HostState(options, config);
-            _hosts[options] = state;
+            return state;
         }
+
+        var config = _registry.Resolve(options.PoolKey);
+        state = new HostState(config);
+        _hosts[options] = state;
 
         return state;
     }

@@ -1,26 +1,11 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
-    <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-        <IsPackable>false</IsPackable>
-        <OutputType>Exe</OutputType>
-        <IsTestProject>true</IsTestProject>
-    </PropertyGroup>
+<Project Sdk="Microsoft.NET.Sdk">
 
     <ItemGroup>
-        <PackageReference Include="Akka.Hosting.TestKit" Version="1.5.*" />
-        <PackageReference Include="Microsoft.Testing.Extensions.CodeCoverage" Version="18.6.2" />
-        <PackageReference Include="xunit.v3.mtp-v2" Version="3.2.2" />
+        <PackageReference Include="Akka.Hosting.TestKit"/>
     </ItemGroup>
 
     <ItemGroup>
-        <Using Include="Xunit"/>
-    </ItemGroup>
-
-    <ItemGroup>
-      <ProjectReference Include="..\Servus.Akka\Servus.Akka.csproj" />
+        <ProjectReference Include="..\Servus.Akka\Servus.Akka.csproj"/>
     </ItemGroup>
 
 </Project>

@@ -3,14 +3,13 @@ namespace Servus.Akka.Transport.Tcp;
 internal sealed class ConnectionLease : IDisposable
 {
     private readonly CancellationTokenSource _cts;
-    private readonly ClientState _state;
     private readonly long _createdTicks = Environment.TickCount64;
     private bool _alive = true;
 
     internal ConnectionLease(ConnectionHandle handle, ClientState state, CancellationTokenSource cts, ConnectionInfo info)
     {
         Handle = handle;
-        _state = state;
+        State = state;
         _cts = cts;
         Info = info;
     }
@@ -18,7 +17,7 @@ internal sealed class ConnectionLease : IDisposable
     public ConnectionHandle Handle { get; }
     public ConnectionInfo Info { get; }
 
-    internal ClientState State => _state;
+    internal ClientState State { get; }
 
     public bool IsAlive() => _alive;
 
@@ -44,6 +43,6 @@ internal sealed class ConnectionLease : IDisposable
         _alive = false;
         _cts.Cancel();
         _cts.Dispose();
-        _state.Dispose();
+        State.Dispose();
     }
 }

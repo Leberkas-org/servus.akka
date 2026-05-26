@@ -1,3 +1,5 @@
+using System.Net.Quic;
+
 namespace Servus.Akka.Transport.Quic;
 
 internal sealed class StreamHandle : IAsyncDisposable
@@ -23,7 +25,7 @@ internal sealed class StreamHandle : IAsyncDisposable
 
     public void CompleteWrites()
     {
-        if (_stream is System.Net.Quic.QuicStream qs)
+        if (_stream is QuicStream qs)
         {
             qs.CompleteWrites();
         }
@@ -31,9 +33,9 @@ internal sealed class StreamHandle : IAsyncDisposable
 
     public void Abort(long errorCode)
     {
-        if (_stream is System.Net.Quic.QuicStream qs)
+        if (_stream is QuicStream qs)
         {
-            qs.Abort(System.Net.Quic.QuicAbortDirection.Both, errorCode);
+            qs.Abort(QuicAbortDirection.Both, errorCode);
         }
     }
 

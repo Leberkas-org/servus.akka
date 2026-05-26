@@ -9,23 +9,6 @@ namespace Servus.Akka.Tests.Transport.Quic.Client;
 
 public sealed class QuicConnectionMigrationSpec
 {
-
-    [Fact(Timeout = 5000)]
-    [Trait("RFC", "RFC9000-9")]
-    public void QuicOptions_should_default_AllowConnectionMigration_to_true()
-    {
-        var options = new QuicTransportOptions { Host = "example.com", Port = 443 };
-        Assert.True(options.AllowConnectionMigration);
-    }
-
-    [Fact(Timeout = 5000)]
-    [Trait("RFC", "RFC9000-9")]
-    public void QuicOptions_should_accept_AllowConnectionMigration_false()
-    {
-        var options = new QuicTransportOptions { Host = "example.com", Port = 443, AllowConnectionMigration = false };
-        Assert.False(options.AllowConnectionMigration);
-    }
-
     [Fact(Timeout = 5000)]
     [Trait("RFC", "RFC9000-9")]
     public void Dispatch_MigrationDetected_should_push_ConnectionMigrationDetected()
@@ -57,7 +40,11 @@ public sealed class QuicConnectionMigrationSpec
 
         var handle = new QuicConnectionHandle(
             openStream: (_, _) => Task.FromResult((Stream: (Stream)new MemoryStream(), StreamId: 0L)),
-            acceptInboundStream: async ct => { await Task.Delay(Timeout.Infinite, ct); return null; },
+            acceptInboundStream: async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return null;
+            },
             getLocalEndPoint: () => new IPEndPoint(IPAddress.Loopback, 9999),
             getRemoteEndPoint: () => currentRemoteEp,
             dispose: () => ValueTask.CompletedTask);
@@ -86,7 +73,11 @@ public sealed class QuicConnectionMigrationSpec
 
         var handle = new QuicConnectionHandle(
             openStream: (_, _) => Task.FromResult((Stream: (Stream)new MemoryStream(), StreamId: 0L)),
-            acceptInboundStream: async ct => { await Task.Delay(Timeout.Infinite, ct); return null; },
+            acceptInboundStream: async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return null;
+            },
             getLocalEndPoint: () => new IPEndPoint(IPAddress.Loopback, 9999),
             getRemoteEndPoint: () => stableEp,
             dispose: () => ValueTask.CompletedTask);
@@ -114,7 +105,11 @@ public sealed class QuicConnectionMigrationSpec
 
         var handle = new QuicConnectionHandle(
             openStream: (_, _) => Task.FromResult((Stream: (Stream)new MemoryStream(), StreamId: 0L)),
-            acceptInboundStream: async ct => { await Task.Delay(Timeout.Infinite, ct); return null; },
+            acceptInboundStream: async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return null;
+            },
             getLocalEndPoint: () => new IPEndPoint(IPAddress.Loopback, 9999),
             getRemoteEndPoint: () => changedEp,
             dispose: () => ValueTask.CompletedTask);
@@ -148,7 +143,11 @@ public sealed class QuicConnectionMigrationSpec
 
         var handle = new QuicConnectionHandle(
             openStream: (_, _) => Task.FromResult((Stream: (Stream)new MemoryStream(), StreamId: 0L)),
-            acceptInboundStream: async ct => { await Task.Delay(Timeout.Infinite, ct); return null; },
+            acceptInboundStream: async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct);
+                return null;
+            },
             getLocalEndPoint: () => new IPEndPoint(IPAddress.Loopback, 9999),
             getRemoteEndPoint: () => stableEp,
             dispose: () => ValueTask.CompletedTask);

@@ -1,37 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-    <PropertyGroup>
-        <Company>Leberkas-org</Company>
-        <PackageIcon>logo.png</PackageIcon>
-        <PackageReadmeFile>README.md</PackageReadmeFile>
-        <PackageLicenseFile>LICENSE</PackageLicenseFile>
-        <!--<PackageProjectUrl>https://servusakka.readthedocs.io</PackageProjectUrl>-->
-        <RepositoryUrl>https://github.com/Leberkas-org/servus.akka</RepositoryUrl>
-        <RepositoryType>git</RepositoryType>
-        <Copyright>Copyright (c) Leberkas-org 2025-$([System.DateTime]::Now.Year)</Copyright>
-    </PropertyGroup>
-
-    <PropertyGroup>
-        <TargetFramework>net8.0</TargetFramework>
-        <LangVersion>13</LangVersion>
-        <ImplicitUsings>enable</ImplicitUsings>
-        <Nullable>enable</Nullable>
-    </PropertyGroup>
-
-    <PropertyGroup>
-        <PublishRepositoryUrl>true</PublishRepositoryUrl>
-        <DebugType>embedded</DebugType>
-        <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    </PropertyGroup>
-
     <ItemGroup>
-        <PackageReference Include="Akka.Hosting" Version="[1.5.0,)"/>
-        <PackageReference Include="Akka.Streams" Version="[1.5.0,)"/>
-        <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="[8.0.0,)"/>
-        <PackageReference Include="Servus" Version="[0.34.0,)"/>
+        <InternalsVisibleTo Include="Servus.Akka.Tests"/>
     </ItemGroup>
 
     <ItemGroup>
+        <PackageReference Include="Akka.Hosting"/>
+        <PackageReference Include="Akka.Streams"/>
+        <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
+        <PackageReference Include="Servus.Core"/>
         <None Include="../../README.md" Pack="true" Visible="false" PackagePath="\"/>
         <None Include="../../docs/public/logo.png" Pack="true" Visible="false" PackagePath="\"/>
         <None Include="../../LICENSE" Pack="true" Visible="false" PackagePath="\"/>

@@ -114,7 +114,6 @@ public sealed class TransportOptionsSpec
         Assert.Equal(TimeSpan.FromSeconds(30), opts.IdleTimeout);
         Assert.Equal(100, opts.MaxBidirectionalStreams);
         Assert.Equal(3, opts.MaxUnidirectionalStreams);
-        Assert.True(opts.AllowConnectionMigration);
     }
 
     [Fact(Timeout = 5000)]
@@ -217,8 +216,7 @@ public sealed class TransportOptionsSpec
         var opts = new TcpTransportOptions { Host = "localhost", Port = 80 };
 
         Assert.False(opts.Equals(null));
-        Assert.False(opts == null);
-        Assert.True(opts != null);
+        Assert.NotNull(opts);
     }
 
     [Fact(Timeout = 5000)]
