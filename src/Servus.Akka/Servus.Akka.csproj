@@ -13,6 +13,7 @@
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
+        <LangVersion>13</LangVersion>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>
@@ -25,6 +26,7 @@
 
     <ItemGroup>
         <PackageReference Include="Akka.Hosting" Version="[1.5.0,)"/>
+        <PackageReference Include="Akka.Streams" Version="[1.5.0,)"/>
         <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="[8.0.0,)"/>
         <PackageReference Include="Servus" Version="[0.34.0,)"/>
     </ItemGroup>
