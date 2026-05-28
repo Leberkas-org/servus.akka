@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_call:
+    inputs:
+      version:
+        description: 'Package version for packing (without v prefix)'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: ./src/global.json
+
+      - name: Restore
+        run: dotnet restore ./src/Servus.Akka.sln
+
+      - name: Build
+        run: dotnet build -c Release --no-restore ./src/Servus.Akka.sln
+
+      - name: Test
+        working-directory: ./src
+        run: dotnet test -c Release --no-build --solution *.sln
+
+      - name: Pack
+        if: inputs.version != ''
+        run: dotnet pack -c Release --no-build -o ./nupkg ./src/Servus.Akka.sln -p:PackageVersion=${{ inputs.version }}
+
+      - name: Upload NuGet packages
+        if: inputs.version != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkg/*.nupkg
