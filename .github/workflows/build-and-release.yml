@@ -97,9 +97,9 @@ jobs:
         with:
           global-json-file: ${{ env.GLOBAL_JSON_PATH }}
       
-      - name: Publish to NuGet
-        run: |
-          dotnet nuget push --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
+#      - name: Publish to NuGet
+#        run: |
+#          dotnet nuget push --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate ${{ env.PACKAGE_OUTPUT_DIRECTORY }}/*.nupkg
 
       - name: Create and push Git tag
         run: |
