@@ -32,7 +32,7 @@ public class LocalEntityRegionTests : TestKit
         var region = Sys.GetActor<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-1", "hello"), TestActor);
-        var response = ExpectMsg<EntityResponse>();
+        var response = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1", response.EntityId);
         Assert.Equal("hello", response.Payload);
@@ -44,7 +44,7 @@ public class LocalEntityRegionTests : TestKit
         var region = Sys.GetActor<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-new", "first"), TestActor);
-        var response = ExpectMsg<EntityResponse>();
+        var response = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-new", response.EntityId);
         Assert.Equal("first", response.Payload);
@@ -56,10 +56,10 @@ public class LocalEntityRegionTests : TestKit
         var region = Sys.GetActor<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-1", "first"), TestActor);
-        var response1 = ExpectMsg<EntityResponse>();
+        var response1 = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         region.Tell(new EntityMessage("order-1", "second"), TestActor);
-        var response2 = ExpectMsg<EntityResponse>();
+        var response2 = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1", response1.EntityId);
         Assert.Equal("order-1", response2.EntityId);
@@ -73,10 +73,10 @@ public class LocalEntityRegionTests : TestKit
         var region = Sys.GetActor<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-1", "hello"), TestActor);
-        var r1 = ExpectMsg<EntityResponse>();
+        var r1 = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         region.Tell(new EntityMessage("order-2", "world"), TestActor);
-        var r2 = ExpectMsg<EntityResponse>();
+        var r2 = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1", r1.EntityId);
         Assert.Equal("order-2", r2.EntityId);
@@ -100,15 +100,15 @@ public class LocalEntityRegionPassivationTests : TestKit
     [Fact]
     public async Task PassivatesIdleEntities()
     {
-        var region = Sys.GetActor<EchoEntityActor>();
+        var region = await Sys.GetActorAsync<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-1", "hello"), TestActor);
-        ExpectMsg<EntityResponse>();
+        await ExpectMsgAsync<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
-        await Task.Delay(TimeSpan.FromSeconds(3));
+        await Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
 
         region.Tell(new EntityMessage("order-1", "after-passivation"), TestActor);
-        var response = ExpectMsg<EntityResponse>();
+        var response = await ExpectMsgAsync<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1", response.EntityId);
         Assert.Equal("after-passivation", response.Payload);
@@ -140,7 +140,7 @@ public class LocalEntityRegionRecoveryTests : TestKit
         var region = Sys.GetActor<EchoEntityActor>();
 
         region.Tell(new EntityMessage("pre-existing-1", "hello"), TestActor);
-        var response = ExpectMsg<EntityResponse>();
+        var response = ExpectMsg<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("pre-existing-1", response.EntityId);
         Assert.Equal("hello", response.Payload);
@@ -155,9 +155,9 @@ public class LocalEntityRegionInvalidEntityIdTests : TestKit
         public object EntityMessage(object message) => message;
     }
 
-    public class SinkActor : ReceiveActor
+    private class SinkActor : ReceiveActor
     {
-        public SinkActor(string entityId)
+        public SinkActor()
         {
             ReceiveAny(_ => Sender.Tell("ok"));
         }
@@ -167,7 +167,7 @@ public class LocalEntityRegionInvalidEntityIdTests : TestKit
     {
         builder.WithLocalEntityRegion<SinkActor>(
             typeName: "invalid-id",
-            entityPropsFactory: id => Props.Create(() => new SinkActor(id)),
+            entityPropsFactory: id => Props.Create(() => new SinkActor()),
             messageExtractor: new InvalidIdExtractor());
     }
 
@@ -181,7 +181,7 @@ public class LocalEntityRegionInvalidEntityIdTests : TestKit
     {
         var region = Sys.GetActor<SinkActor>();
         region.Tell(invalidId, TestActor);
-        ExpectNoMsg(TimeSpan.FromMilliseconds(500));
+        ExpectNoMsg(TimeSpan.FromMilliseconds(500), TestContext.Current.CancellationToken);
     }
 
     [Fact]
@@ -189,7 +189,7 @@ public class LocalEntityRegionInvalidEntityIdTests : TestKit
     {
         var region = Sys.GetActor<SinkActor>();
         region.Tell("order-1", TestActor);
-        ExpectMsg<string>("ok");
+        ExpectMsg<string>("ok", cancellationToken: TestContext.Current.CancellationToken);
     }
 }
 
@@ -210,16 +210,16 @@ public class LocalEntityRegionPassivationRaceTests : TestKit
     [Fact]
     public async Task MessageDuringPassivationIsNotLost()
     {
-        var region = Sys.GetActor<EchoEntityActor>();
+        var region = await Sys.GetActorAsync<EchoEntityActor>();
 
         region.Tell(new EntityMessage("order-1", "first"), TestActor);
-        ExpectMsg<EntityResponse>();
+        await ExpectMsgAsync<EntityResponse>(cancellationToken: TestContext.Current.CancellationToken);
 
-        await Task.Delay(TimeSpan.FromSeconds(2));
+        await Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken);
 
         // Entity is passivating or just passivated — send message immediately
         region.Tell(new EntityMessage("order-1", "after-race"), TestActor);
-        var response = ExpectMsg<EntityResponse>(TimeSpan.FromSeconds(5));
+        var response = await ExpectMsgAsync<EntityResponse>(TimeSpan.FromSeconds(5), cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1", response.EntityId);
         Assert.Equal("after-race", response.Payload);
@@ -256,7 +256,7 @@ public class LocalEntityRegionCustomExtractorTests : TestKit
         var region = Sys.GetActor<StringEchoActor>();
 
         region.Tell("order-1:hello", TestActor);
-        var response = ExpectMsg<string>();
+        var response = ExpectMsg<string>(cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("order-1:hello", response);
     }

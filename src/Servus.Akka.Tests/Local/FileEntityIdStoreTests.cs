@@ -23,7 +23,7 @@ public class FileEntityIdStoreTests : IDisposable
         await store.EntityStarted("entity-2");
 
         Assert.True(File.Exists(StorePath));
-        var lines = await File.ReadAllLinesAsync(StorePath);
+        var lines = await File.ReadAllLinesAsync(StorePath, TestContext.Current.CancellationToken);
         Assert.Equal(2, lines.Length);
         Assert.Contains("entity-1", lines);
         Assert.Contains("entity-2", lines);
@@ -52,7 +52,7 @@ public class FileEntityIdStoreTests : IDisposable
         await store.EntityStarted("entity-2");
         await store.EntityStopped("entity-1");
 
-        var lines = await File.ReadAllLinesAsync(StorePath);
+        var lines = await File.ReadAllLinesAsync(StorePath, TestContext.Current.CancellationToken);
         Assert.Single(lines);
         Assert.Contains("entity-2", lines);
     }
