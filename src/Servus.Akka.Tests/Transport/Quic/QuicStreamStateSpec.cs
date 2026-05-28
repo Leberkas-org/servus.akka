@@ -112,6 +112,20 @@ public sealed class QuicStreamStateSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void CompleteWrites_in_HalfClosedRead_should_transition_to_Closed()
+    {
+        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        state.AttachHandle(new StreamHandle(new MemoryStream()));
+        state.OnReadCompleted();
+
+        Assert.Equal(StreamPhase.HalfClosedRead, state.Phase);
+
+        state.CompleteWrites();
+
+        Assert.Equal(StreamPhase.Closed, state.Phase);
+    }
+
+    [Fact(Timeout = 5000)]
     public void Abort_should_transition_to_Closed()
     {
         var state = new QuicStreamState(StreamDirection.Bidirectional);

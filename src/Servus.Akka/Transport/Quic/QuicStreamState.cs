@@ -68,6 +68,10 @@ internal sealed class QuicStreamState(StreamDirection direction)
                 _handle?.CompleteWrites();
                 Phase = StreamPhase.HalfClosedWrite;
                 return;
+            case StreamPhase.HalfClosedRead:
+                _handle?.CompleteWrites();
+                Phase = StreamPhase.Closed;
+                return;
         }
     }
 

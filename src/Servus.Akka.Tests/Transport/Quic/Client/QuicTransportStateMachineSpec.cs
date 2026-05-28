@@ -439,7 +439,7 @@ public sealed class QuicTransportStateMachineSpec
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
-        var streamId = 456L;
+        var streamId = 3;
         var stream = new MemoryStream();
         sm.Dispatch(new InboundStreamAccepted(stream, streamId));
 

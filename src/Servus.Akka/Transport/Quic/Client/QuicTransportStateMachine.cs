@@ -212,6 +212,11 @@ public sealed class QuicTransportStateMachine(
         if (_streams.TryGetValue(streamId, out var state))
         {
             state.CompleteWrites();
+            if (state.Phase == StreamPhase.Closed)
+            {
+                _streams.Remove(streamId);
+                _ = state.DisposeAsync();
+            }
         }
 
         ops.OnSignalPullOutbound();
@@ -277,12 +282,15 @@ public sealed class QuicTransportStateMachine(
     {
         var streamId = StreamTarget.FromId(rawStreamId);
         var handle = new StreamHandle(stream);
-        var state = new QuicStreamState(StreamDirection.Unidirectional);
+        var direction = (rawStreamId & 0x02) != 0
+            ? StreamDirection.Unidirectional
+            : StreamDirection.Bidirectional;
+        var state = new QuicStreamState(direction);
         state.AttachHandle(handle);
         _streams[streamId] = state;
 
         _pumpManager?.StartInboundPump(handle, rawStreamId, _connectionGen);
-        ops.OnPushInbound(new ServerStreamAccepted(streamId, StreamDirection.Unidirectional));
+        ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)
