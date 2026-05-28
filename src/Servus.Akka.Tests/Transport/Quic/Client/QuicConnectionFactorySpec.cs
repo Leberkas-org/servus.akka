@@ -162,7 +162,7 @@ public sealed class QuicConnectionFactorySpec
 
         var options = new QuicTransportOptions
         {
-            Host = "invalid-host-that-does-not-exist-12345.com",
+            Host = "invalid-host-that-does-not-exist-@12345",
             Port = 443,
             ApplicationProtocols = [LoopbackQuicServer.Alpn],
             ServerCertificateValidationCallback = (_, _, _, _) => true
