@@ -1,0 +1,61 @@
+name: Publish NuGet
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Tag name (e.g. v0.1.0)'
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g. 0.1.0 or v0.1.0)'
+        required: true
+        type: string
+
+jobs:
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      pkg_version: ${{ steps.version.outputs.pkg_version }}
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          RAW="${{ inputs.version }}"
+          echo "pkg_version=${RAW#v}" >> "$GITHUB_OUTPUT"
+        shell: bash
+
+  ci:
+    needs: determine-version
+    uses: ./.github/workflows/ci.yml
+    with:
+      version: ${{ needs.determine-version.outputs.pkg_version }}
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: ci
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Download NuGet packages
+        uses: actions/download-artifact@v4
+        with:
+          name: nuget-packages
+          path: ./nupkg
+
+      - name: NuGet login (Trusted Publishing)
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      - name: Push to NuGet.org
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ steps.nuget-login.outputs.NUGET_API_KEY }} --skip-duplicate
+
+      - name: Push to GitHub Packages
+        run: dotnet nuget push ./nupkg/*.nupkg --source https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json --api-key ${{ secrets.GITHUB_TOKEN }} --skip-duplicate
