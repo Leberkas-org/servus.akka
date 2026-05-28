@@ -12,6 +12,8 @@ public class ClientProviderCollection;
 [Collection("ClientProvider")]
 public sealed class TcpClientProviderSpec
 {
+    const string InvalidHostName = "invalid-host-that-does-not-exist-@12345.local";
+    
     [Fact(Timeout = 5000)]
     public void TcpClientProvider_should_initialize_with_options()
     {
@@ -222,7 +224,7 @@ public sealed class TcpClientProviderSpec
     {
         var options = new TcpTransportOptions
         {
-            Host = "invalid-host-that-does-not-exist-12345.local",
+            Host = InvalidHostName,
             Port = 80
         };
 
@@ -281,7 +283,7 @@ public sealed class TcpClientProviderSpec
     {
         var options = new TcpTransportOptions
         {
-            Host = "invalid-host-that-does-not-exist-xyz.local",
+            Host = InvalidHostName,
             Port = 443
         };
 
@@ -298,7 +300,7 @@ public sealed class TcpClientProviderSpec
     {
         var options = new TcpTransportOptions
         {
-            Host = "invalid-host-that-does-not-exist-abc.local",
+            Host = InvalidHostName,
             Port = 443,
             SocketSendBufferSize = 131072,
             SocketReceiveBufferSize = 131072
@@ -321,7 +323,7 @@ public sealed class TcpClientProviderSpec
     {
         var options = new TcpTransportOptions
         {
-            Host = "invalid-host-that-does-not-exist-def.local",
+            Host = InvalidHostName,
             Port = 443,
             SocketSendBufferSize = 0,
             SocketReceiveBufferSize = 0
