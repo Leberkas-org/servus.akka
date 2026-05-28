@@ -148,10 +148,8 @@ public sealed class StreamSourceStageSpec : TestKit
         return result;
     }
 
-    private sealed class SynchronousMemoryStream : MemoryStream
+    private sealed class SynchronousMemoryStream(byte[] data) : MemoryStream(data)
     {
-        public SynchronousMemoryStream(byte[] data) : base(data) { }
-
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             var bytesRead = Read(buffer.Span);
@@ -159,18 +157,11 @@ public sealed class StreamSourceStageSpec : TestKit
         }
     }
 
-    private sealed class SlowMemoryStream : MemoryStream
+    private sealed class SlowMemoryStream(byte[] data, int delayMs) : MemoryStream(data)
     {
-        private readonly int _delayMs;
-
-        public SlowMemoryStream(byte[] data, int delayMs) : base(data)
-        {
-            _delayMs = delayMs;
-        }
-
         public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            await Task.Delay(_delayMs, cancellationToken);
+            await Task.Delay(delayMs, cancellationToken);
             return Read(buffer.Span);
         }
     }

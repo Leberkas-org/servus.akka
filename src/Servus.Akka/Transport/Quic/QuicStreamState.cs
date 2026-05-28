@@ -9,19 +9,13 @@ internal enum StreamPhase
     Closed
 }
 
-internal sealed class QuicStreamState
+internal sealed class QuicStreamState(StreamDirection direction)
 {
     private StreamHandle? _handle;
     private Queue<TransportBuffer>? _openingBuffer = new();
 
-    public QuicStreamState(StreamDirection direction)
-    {
-        Direction = direction;
-        Phase = StreamPhase.Opening;
-    }
-
-    public StreamPhase Phase { get; private set; }
-    public StreamDirection Direction { get; }
+    public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
+    public StreamDirection Direction { get; } = direction;
     public bool HasHandle => _handle is not null;
     public int PendingWriteCount => _openingBuffer?.Count ?? 0;
     public bool IsCompleteWritesDeferred { get; private set; }

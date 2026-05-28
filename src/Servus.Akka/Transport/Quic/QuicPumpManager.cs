@@ -3,21 +3,15 @@ using Akka.Actor;
 
 namespace Servus.Akka.Transport.Quic;
 
-internal sealed class QuicPumpManager
+internal sealed class QuicPumpManager(IActorRef self)
 {
-    private readonly IActorRef _self;
     private CancellationTokenSource? _pumpsCts;
     private CancellationTokenSource? _acceptCts;
-
-    public QuicPumpManager(IActorRef self)
-    {
-        _self = self;
-    }
 
     public void StartInboundPump(StreamHandle handle, long streamId, int gen)
     {
         _pumpsCts ??= new CancellationTokenSource();
-        _ = DirectStreamPumpAsync(handle, streamId, _pumpsCts.Token, _self, gen);
+        _ = DirectStreamPumpAsync(handle, streamId, _pumpsCts.Token, self, gen);
     }
 
     public void StartAcceptLoop(QuicConnectionHandle connectionHandle)
@@ -25,7 +19,7 @@ internal sealed class QuicPumpManager
         _acceptCts?.Cancel();
         _acceptCts?.Dispose();
         _acceptCts = new CancellationTokenSource();
-        _ = AcceptLoopAsync(connectionHandle, _self, _acceptCts.Token);
+        _ = AcceptLoopAsync(connectionHandle, self, _acceptCts.Token);
     }
 
     public void StopAll()

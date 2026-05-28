@@ -2,25 +2,14 @@ using System.Threading.Channels;
 
 namespace Servus.Akka.Transport.Tcp;
 
-internal sealed class ConnectionHandle
+internal sealed class ConnectionHandle(
+    ChannelWriter<TransportBuffer> outboundWriter,
+    ChannelReader<TransportBuffer> inboundReader,
+    CancellationToken token)
 {
-    private readonly ChannelWriter<TransportBuffer> _outboundWriter;
-    private readonly ChannelReader<TransportBuffer> _inboundReader;
-    private readonly CancellationToken _token;
-
-    public ConnectionHandle(
-        ChannelWriter<TransportBuffer> outboundWriter,
-        ChannelReader<TransportBuffer> inboundReader,
-        CancellationToken token)
-    {
-        _outboundWriter = outboundWriter;
-        _inboundReader = inboundReader;
-        _token = token;
-    }
-
     public void Write(TransportBuffer buffer)
     {
-        if (!_outboundWriter.TryWrite(buffer))
+        if (!outboundWriter.TryWrite(buffer))
         {
             buffer.Dispose();
         }
@@ -28,13 +17,13 @@ internal sealed class ConnectionHandle
 
     public bool TryRead(out TransportBuffer? buffer)
     {
-        return _inboundReader.TryRead(out buffer);
+        return inboundReader.TryRead(out buffer);
     }
 
     public void SignalClose()
     {
-        _outboundWriter.TryComplete();
+        outboundWriter.TryComplete();
     }
 
-    public bool IsCancelled => _token.IsCancellationRequested;
+    public bool IsCancelled => token.IsCancellationRequested;
 }

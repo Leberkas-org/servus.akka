@@ -1,14 +1,9 @@
 namespace Servus.Akka.Transport;
 
-public sealed class PoolConfigRegistry
+public sealed class PoolConfigRegistry(TcpPoolConfig defaultConfig)
 {
     private readonly Dictionary<string, TcpPoolConfig> _configs = new(StringComparer.OrdinalIgnoreCase);
-    private readonly TcpPoolConfig _default;
-
-    public PoolConfigRegistry(TcpPoolConfig defaultConfig)
-    {
-        _default = defaultConfig ?? throw new ArgumentNullException(nameof(defaultConfig));
-    }
+    private readonly TcpPoolConfig _default = defaultConfig ?? throw new ArgumentNullException(nameof(defaultConfig));
 
     public PoolConfigRegistry Register(string poolKey, TcpPoolConfig config)
     {

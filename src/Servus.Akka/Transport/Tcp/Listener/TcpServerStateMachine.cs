@@ -4,55 +4,38 @@ using Akka.Actor;
 
 namespace Servus.Akka.Transport.Tcp.Listener;
 
-internal sealed class TcpServerStateMachine
+internal sealed class TcpServerStateMachine(
+    ITransportOperations ops,
+    IActorRef self,
+    ClientState state,
+    ConnectionInfo connectionInfo,
+    SslStream? sslStream = null,
+    bool allowDelayedNegotiation = false)
 {
-    private readonly ITransportOperations _ops;
-    private readonly IActorRef _self;
-    private readonly ClientState _state;
-    private readonly ConnectionInfo _connectionInfo;
-    private readonly SslStream? _sslStream;
-    private readonly bool _allowDelayedNegotiation;
-
     private ConnectionHandle? _handle;
     private int _connectionGen;
     private bool _upstreamFinished;
     private TcpPumpManager? _pumpManager;
 
-    public TcpServerStateMachine(
-        ITransportOperations ops,
-        IActorRef self,
-        ClientState state,
-        ConnectionInfo connectionInfo,
-        SslStream? sslStream = null,
-        bool allowDelayedNegotiation = false)
-    {
-        _ops = ops;
-        _self = self;
-        _state = state;
-        _connectionInfo = connectionInfo;
-        _sslStream = sslStream;
-        _allowDelayedNegotiation = allowDelayedNegotiation;
-    }
-
     public void Start()
     {
         _connectionGen++;
-        _handle = new ConnectionHandle(_state.OutboundWriter, _state.InboundReader, CancellationToken.None);
+        _handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, CancellationToken.None);
 
-        _pumpManager = new TcpPumpManager(_self);
-        _pumpManager.StartPumps(_state, _connectionGen);
+        _pumpManager = new TcpPumpManager(self);
+        _pumpManager.StartPumps(state, _connectionGen);
 
-        if (_sslStream is not null || _allowDelayedNegotiation)
+        if (sslStream is not null || allowDelayedNegotiation)
         {
-            var baseSecurity = _connectionInfo.Security;
+            var baseSecurity = connectionInfo.Security;
             var security = baseSecurity is not null
-                ? baseSecurity with { SslStream = _sslStream, AllowDelayedNegotiation = _allowDelayedNegotiation }
-                : new SecurityInfo(default, default, SslStream: _sslStream, AllowDelayedNegotiation: _allowDelayedNegotiation);
-            _ops.OnPushInbound(new TransportConnected(_connectionInfo with { Security = security }));
+                ? baseSecurity with { SslStream = sslStream, AllowDelayedNegotiation = allowDelayedNegotiation }
+                : new SecurityInfo(default, default, SslStream: sslStream, AllowDelayedNegotiation: allowDelayedNegotiation);
+            ops.OnPushInbound(new TransportConnected(connectionInfo with { Security = security }));
         }
         else
         {
-            _ops.OnPushInbound(new TransportConnected(_connectionInfo));
+            ops.OnPushInbound(new TransportConnected(connectionInfo));
         }
     }
 
@@ -96,10 +79,10 @@ internal sealed class TcpServerStateMachine
                 break;
             case DisconnectTransport:
                 Cleanup();
-                _ops.OnCompleteStage();
+                ops.OnCompleteStage();
                 break;
             default:
-                _ops.OnSignalPullOutbound();
+                ops.OnSignalPullOutbound();
                 break;
         }
     }
@@ -108,7 +91,7 @@ internal sealed class TcpServerStateMachine
     {
         _upstreamFinished = true;
         Cleanup();
-        _ops.OnCompleteStage();
+        ops.OnCompleteStage();
     }
 
     public void HandleDownstreamFinish()
@@ -126,19 +109,19 @@ internal sealed class TcpServerStateMachine
         if (_handle is null)
         {
             data.Buffer.Dispose();
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
             return;
         }
 
         _handle.Write(data.Buffer);
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void OnInboundBatch(ITransportInbound[] batch, int count)
     {
         for (var i = 0; i < count; i++)
         {
-            _ops.OnPushInbound(batch[i]);
+            ops.OnPushInbound(batch[i]);
             batch[i] = null!;
         }
 
@@ -147,26 +130,26 @@ internal sealed class TcpServerStateMachine
 
     private void OnInboundComplete(DisconnectReason reason)
     {
-        _ops.OnPushInbound(new TransportDisconnected(reason));
+        ops.OnPushInbound(new TransportDisconnected(reason));
         _pumpManager?.StopPumps();
         _handle = null;
 
         if (_upstreamFinished)
         {
-            _ops.OnCompleteStage();
+            ops.OnCompleteStage();
         }
         else
         {
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
         }
     }
 
     private void OnOutboundWriteFailed()
     {
-        _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
+        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
         _pumpManager?.StopPumps();
         _handle = null;
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void Cleanup()
@@ -175,6 +158,6 @@ internal sealed class TcpServerStateMachine
         _pumpManager?.StopPumps();
         _pumpManager = null;
         _handle = null;
-        _state.Dispose();
+        state.Dispose();
     }
 }

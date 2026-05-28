@@ -4,16 +4,10 @@ using System.Net.Security;
 
 namespace Servus.Akka.Transport.Quic.Client;
 
-internal sealed class QuicClientProvider : IAsyncDisposable
+internal sealed class QuicClientProvider(QuicTransportOptions options) : IAsyncDisposable
 {
-    private readonly QuicTransportOptions _options;
     private QuicConnection? _connection;
     private readonly SemaphoreSlim _connectLock = new(1, 1);
-
-    public QuicClientProvider(QuicTransportOptions options)
-    {
-        _options = options;
-    }
 
     public EndPoint? LocalEndPoint => _connection?.LocalEndPoint;
     public EndPoint? RemoteEndPoint => _connection?.RemoteEndPoint;
@@ -55,30 +49,30 @@ internal sealed class QuicClientProvider : IAsyncDisposable
                 return existing;
             }
 
-            if (string.IsNullOrEmpty(_options.Host))
+            if (string.IsNullOrEmpty(options.Host))
             {
                 throw new InvalidOperationException("QUIC connections require a non-empty hostname for TLS SNI.");
             }
 
-            EndPoint remoteEndPoint = IPAddress.TryParse(_options.Host, out var ip)
-                ? new IPEndPoint(ip, _options.Port)
-                : new DnsEndPoint(_options.Host, _options.Port);
+            EndPoint remoteEndPoint = IPAddress.TryParse(options.Host, out var ip)
+                ? new IPEndPoint(ip, options.Port)
+                : new DnsEndPoint(options.Host, options.Port);
 
             var clientConnectionOptions = new QuicClientConnectionOptions
             {
                 RemoteEndPoint = remoteEndPoint,
                 DefaultStreamErrorCode = 0x0100,
                 DefaultCloseErrorCode = 0x0100,
-                MaxInboundBidirectionalStreams = _options.MaxBidirectionalStreams,
-                MaxInboundUnidirectionalStreams = _options.MaxUnidirectionalStreams,
-                IdleTimeout = _options.IdleTimeout,
+                MaxInboundBidirectionalStreams = options.MaxBidirectionalStreams,
+                MaxInboundUnidirectionalStreams = options.MaxUnidirectionalStreams,
+                IdleTimeout = options.IdleTimeout,
                 ClientAuthenticationOptions = new SslClientAuthenticationOptions
                 {
-                    TargetHost = _options.TargetHost ?? _options.Host,
-                    ApplicationProtocols = _options.ApplicationProtocols,
-                    RemoteCertificateValidationCallback = _options.ServerCertificateValidationCallback,
-                    EnabledSslProtocols = _options.EnabledSslProtocols,
-                    ClientCertificates = _options.ClientCertificates
+                    TargetHost = options.TargetHost ?? options.Host,
+                    ApplicationProtocols = options.ApplicationProtocols,
+                    RemoteCertificateValidationCallback = options.ServerCertificateValidationCallback,
+                    EnabledSslProtocols = options.EnabledSslProtocols,
+                    ClientCertificates = options.ClientCertificates
                 }
             };
 

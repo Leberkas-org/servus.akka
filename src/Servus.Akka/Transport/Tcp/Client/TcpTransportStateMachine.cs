@@ -4,14 +4,13 @@ using static Servus.Core.Servus;
 
 namespace Servus.Akka.Transport.Tcp.Client;
 
-public sealed class TcpTransportStateMachine
+public sealed class TcpTransportStateMachine(
+    ITransportOperations ops,
+    IActorRef connectionManager,
+    IPoolingStrategy poolingStrategy,
+    IActorRef self)
 {
     private const string ConnectTimerKey = "connect-timeout";
-
-    private readonly ITransportOperations _ops;
-    private readonly IActorRef _connectionManager;
-    private readonly IPoolingStrategy _poolingStrategy;
-    private readonly IActorRef _self;
 
     private ConnectionHandle? _handle;
     private ConnectionLease? _currentLease;
@@ -26,18 +25,6 @@ public sealed class TcpTransportStateMachine
     private bool _isReconnecting;
     private TcpPumpManager? _pumpManager;
     private CancellationTokenSource? _acquireCts;
-
-    public TcpTransportStateMachine(
-        ITransportOperations ops,
-        IActorRef connectionManager,
-        IPoolingStrategy poolingStrategy,
-        IActorRef self)
-    {
-        _ops = ops;
-        _connectionManager = connectionManager;
-        _poolingStrategy = poolingStrategy;
-        _self = self;
-    }
 
     internal void Dispatch(ITcpTransportEvent evt)
     {
@@ -97,16 +84,16 @@ public sealed class TcpTransportStateMachine
         _upstreamFinished = true;
         if (_handle is null)
         {
-            _ops.OnCompleteStage();
+            ops.OnCompleteStage();
         }
         else if (_pendingWrites.Count == 0)
         {
             _connectionGen++;
             _pumpManager?.StopPumps();
-            ReturnLeaseToPool(_poolingStrategy.OnUpstreamFinish(_currentLease!));
+            ReturnLeaseToPool(poolingStrategy.OnUpstreamFinish(_currentLease!));
             _handle = null;
             _currentLease = null;
-            _ops.OnCompleteStage();
+            ops.OnCompleteStage();
         }
     }
 
@@ -124,13 +111,13 @@ public sealed class TcpTransportStateMachine
 
         _pendingConnect = null;
 
-        _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Timeout));
-        _ops.OnSignalPullOutbound();
+        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Timeout));
+        ops.OnSignalPullOutbound();
     }
 
     public void PostStop()
     {
-        _ops.OnCancelTimer(ConnectTimerKey);
+        ops.OnCancelTimer(ConnectTimerKey);
         CleanupTransport();
 
         while (_pendingWrites.TryDequeue(out var orphan))
@@ -154,7 +141,7 @@ public sealed class TcpTransportStateMachine
         CleanupTransport();
         _pendingConnect = connect;
         AcquireConnection(connect);
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void HandleTransportData(TransportData data)
@@ -162,23 +149,23 @@ public sealed class TcpTransportStateMachine
         if (_handle is null)
         {
             _pendingWrites.Enqueue(data.Buffer);
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
             return;
         }
 
         _handle.Write(data.Buffer);
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void HandleDisconnectTransport(DisconnectTransport disconnect)
     {
         CleanupTransport();
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void OnLeaseAcquired(ConnectionLease lease)
     {
-        _ops.OnCancelTimer(ConnectTimerKey);
+        ops.OnCancelTimer(ConnectTimerKey);
 
         _pendingConnect = null;
         _connectionGen++;
@@ -186,14 +173,14 @@ public sealed class TcpTransportStateMachine
         _currentLease = lease;
         _handle = lease.Handle;
 
-        _pumpManager = new TcpPumpManager(_self);
+        _pumpManager = new TcpPumpManager(self);
         _pumpManager.StartPumps(lease.State, _connectionGen);
         Tracing.For("Connection").Debug(this, "Transport ready");
 
         if (_isReconnecting)
         {
             _isReconnecting = false;
-            _ops.OnPushInbound(new TransportConnected(_currentLease!.Info));
+            ops.OnPushInbound(new TransportConnected(_currentLease!.Info));
         }
 
         FlushPendingWrites();
@@ -206,7 +193,7 @@ public sealed class TcpTransportStateMachine
             return;
         }
 
-        _ops.OnCancelTimer(ConnectTimerKey);
+        ops.OnCancelTimer(ConnectTimerKey);
         Tracing.For("Connection").Warning(this, "Acquisition failed: {0}", ex.Message);
 
         if (_pendingConnect is null)
@@ -215,15 +202,15 @@ public sealed class TcpTransportStateMachine
         }
 
         _pendingConnect = null;
-        _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
-        _ops.OnSignalPullOutbound();
+        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
+        ops.OnSignalPullOutbound();
     }
 
     private void OnInboundBatch(ITransportInbound[] batch, int count)
     {
         for (var i = 0; i < count; i++)
         {
-            _ops.OnPushInbound(batch[i]);
+            ops.OnPushInbound(batch[i]);
             batch[i] = null!;
         }
 
@@ -233,11 +220,11 @@ public sealed class TcpTransportStateMachine
     private void OnInboundComplete(DisconnectReason reason)
     {
         Tracing.For("Connection").Debug(this, "Disconnected: {0}", reason);
-        var poolAction = _poolingStrategy.OnDisconnect(_currentLease!, reason);
+        var poolAction = poolingStrategy.OnDisconnect(_currentLease!, reason);
 
         if (_autoReconnect && _pendingConnect is null && !_upstreamFinished)
         {
-            _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Transient));
+            ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Transient));
             _isReconnecting = true;
 
             while (_pendingWrites.TryDequeue(out var orphan))
@@ -250,11 +237,11 @@ public sealed class TcpTransportStateMachine
             _handle = null;
             _currentLease = null;
 
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
             return;
         }
 
-        _ops.OnPushInbound(new TransportDisconnected(reason));
+        ops.OnPushInbound(new TransportDisconnected(reason));
 
         _leaseReturned = false;
         ReturnLeaseToPool(poolAction);
@@ -264,11 +251,11 @@ public sealed class TcpTransportStateMachine
 
         if (_upstreamFinished)
         {
-            _ops.OnCompleteStage();
+            ops.OnCompleteStage();
         }
         else
         {
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
         }
     }
 
@@ -276,13 +263,13 @@ public sealed class TcpTransportStateMachine
     {
         Tracing.For("Connection").Warning(this, "Write failed: {0}", ex.Message);
         _leaseReturned = false;
-        ReturnLeaseToPool(_poolingStrategy.OnDisconnect(_currentLease!, DisconnectReason.Error));
+        ReturnLeaseToPool(poolingStrategy.OnDisconnect(_currentLease!, DisconnectReason.Error));
 
-        _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
+        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
         _pumpManager?.StopPumps();
         _handle = null;
         _currentLease = null;
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void AcquireConnection(ConnectTransport connect)
@@ -291,8 +278,8 @@ public sealed class TcpTransportStateMachine
         _acquireCts?.Dispose();
         _acquireCts = new CancellationTokenSource();
 
-        TcpConnectionManagerActor.AcquireAsync(_connectionManager, connect.Options, _acquireCts.Token)
-            .PipeTo(_self,
+        TcpConnectionManagerActor.AcquireAsync(connectionManager, connect.Options, _acquireCts.Token)
+            .PipeTo(self,
                 success: lease => new LeaseAcquired(lease),
                 failure: ex => new AcquisitionFailed(ex));
 
@@ -302,7 +289,7 @@ public sealed class TcpTransportStateMachine
             timeout = TimeSpan.FromSeconds(10);
         }
 
-        _ops.OnScheduleTimer(ConnectTimerKey, timeout);
+        ops.OnScheduleTimer(ConnectTimerKey, timeout);
     }
 
     private void ReturnLeaseToPool(PoolAction action)
@@ -314,7 +301,7 @@ public sealed class TcpTransportStateMachine
 
         _leaseReturned = true;
         var canReuse = action == PoolAction.Reuse;
-        _connectionManager.Tell(new TcpConnectionManagerActor.Release(_currentLease, canReuse));
+        connectionManager.Tell(new TcpConnectionManagerActor.Release(_currentLease, canReuse));
     }
 
     private void CleanupTransport()
@@ -350,6 +337,6 @@ public sealed class TcpTransportStateMachine
             }
         }
 
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 }

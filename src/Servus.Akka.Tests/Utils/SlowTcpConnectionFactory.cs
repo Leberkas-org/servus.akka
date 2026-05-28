@@ -36,23 +36,16 @@ internal sealed class SlowQuicConnectionFactory(TimeSpan delay) : IQuicConnectio
     }
 }
 
-internal sealed class MockFactory : IQuicConnectionFactory
+internal sealed class MockFactory(bool shouldFail = false, int maxStreams = 100) : IQuicConnectionFactory
 {
-    private readonly bool _shouldFail;
-    private readonly int _maxStreams;
+    private readonly int _maxStreams = maxStreams;
 
     public int EstablishCount { get; private set; }
-
-    public MockFactory(bool shouldFail = false, int maxStreams = 100)
-    {
-        _shouldFail = shouldFail;
-        _maxStreams = maxStreams;
-    }
 
     public Task<QuicConnectionLease> EstablishAsync(QuicTransportOptions options, CancellationToken ct = default)
     {
         EstablishCount++;
-        if (_shouldFail)
+        if (shouldFail)
         {
             return Task.FromException<QuicConnectionLease>(new IOException("Simulated failure"));
         }

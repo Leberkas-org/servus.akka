@@ -1,14 +1,8 @@
 namespace Servus.Akka.TestKit;
 
-public sealed class BehaviorStack<TIn, TOut>
+public sealed class BehaviorStack<TIn, TOut>(Func<TIn, TOut> defaultBehavior)
 {
-    private readonly Func<TIn, TOut> _default;
     private readonly Stack<Func<TIn, TOut>> _stack = new();
-
-    public BehaviorStack(Func<TIn, TOut> defaultBehavior)
-    {
-        _default = defaultBehavior;
-    }
 
     public void Push(Func<TIn, TOut> behavior) => _stack.Push(behavior);
 
@@ -41,7 +35,7 @@ public sealed class BehaviorStack<TIn, TOut>
             return behavior(input);
         }
 
-        return _default(input);
+        return defaultBehavior(input);
     }
 }
 

@@ -165,36 +165,24 @@ public sealed class StreamSinkStageSpec : TestKit
         }
     }
 
-    private sealed class SlowMemoryStream : MemoryStream
+    private sealed class SlowMemoryStream(int delayMs) : MemoryStream
     {
-        private readonly int _delayMs;
-
-        public SlowMemoryStream(int delayMs)
-        {
-            _delayMs = delayMs;
-        }
-
         public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            await Task.Delay(_delayMs, cancellationToken);
+            await Task.Delay(delayMs, cancellationToken);
             Write(buffer.Span);
         }
 
         public override async Task FlushAsync(CancellationToken cancellationToken = default)
         {
-            await Task.Delay(_delayMs, cancellationToken);
+            await Task.Delay(delayMs, cancellationToken);
             Flush();
         }
     }
 
-    private sealed class FailingMemoryStream : MemoryStream
+    private sealed class FailingMemoryStream(bool failOnFirstWrite) : MemoryStream
     {
-        private bool _failOnFirstWrite;
-
-        public FailingMemoryStream(bool failOnFirstWrite)
-        {
-            _failOnFirstWrite = failOnFirstWrite;
-        }
+        private bool _failOnFirstWrite = failOnFirstWrite;
 
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
         {

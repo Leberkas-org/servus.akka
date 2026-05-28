@@ -1,18 +1,11 @@
 namespace Servus.Akka.Transport.Quic.Client;
 
-internal sealed class QuicConnectionLease : IAsyncDisposable
+internal sealed class QuicConnectionLease(QuicConnectionHandle handle, int maxConcurrentStreams) : IAsyncDisposable
 {
     private readonly long _createdTicks = Environment.TickCount64;
-    private readonly int _maxConcurrentStreams;
     private bool _alive = true;
 
-    public QuicConnectionLease(QuicConnectionHandle handle, int maxConcurrentStreams)
-    {
-        Handle = handle;
-        _maxConcurrentStreams = maxConcurrentStreams;
-    }
-
-    public QuicConnectionHandle Handle { get; }
+    public QuicConnectionHandle Handle { get; } = handle;
 
     public int ActiveStreams { get; private set; }
 
@@ -30,7 +23,7 @@ internal sealed class QuicConnectionLease : IAsyncDisposable
         return Environment.TickCount64 - _createdTicks > (long)maxLifetime.TotalMilliseconds;
     }
 
-    public bool CanAcceptStream() => _alive && ActiveStreams < _maxConcurrentStreams;
+    public bool CanAcceptStream() => _alive && ActiveStreams < maxConcurrentStreams;
 
     public void MarkBusy()
     {

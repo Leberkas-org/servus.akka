@@ -4,7 +4,7 @@ using System.Threading.Channels;
 
 namespace Servus.Akka.Transport.Tcp;
 
-internal sealed class ClientState : IDisposable
+internal sealed class ClientState(Stream stream, PipeMode direction = PipeMode.Bidirectional) : IDisposable
 {
     private static readonly PipeOptions InboundPipeOptions = new(
         pool: MemoryPool<byte>.Shared,
@@ -26,14 +26,14 @@ internal sealed class ClientState : IDisposable
         SingleWriter = true
     };
 
-    public Stream Stream { get; }
-    public PipeMode Direction { get; }
+    public Stream Stream { get; } = stream;
+    public PipeMode Direction { get; } = direction;
 
-    public Pipe InboundPipe { get; }
-    public Pipe OutboundPipe { get; }
+    public Pipe InboundPipe { get; } = new(InboundPipeOptions);
+    public Pipe OutboundPipe { get; } = new(OutboundPipeOptions);
 
-    private readonly Channel<TransportBuffer> _inboundChannel;
-    private readonly Channel<TransportBuffer> _outboundChannel;
+    private readonly Channel<TransportBuffer> _inboundChannel = Channel.CreateUnbounded<TransportBuffer>(ChannelOptions);
+    private readonly Channel<TransportBuffer> _outboundChannel = Channel.CreateUnbounded<TransportBuffer>(ChannelOptions);
 
     public ChannelReader<TransportBuffer> InboundReader => _inboundChannel.Reader;
     public ChannelWriter<TransportBuffer> InboundWriter => _inboundChannel.Writer;
@@ -41,16 +41,6 @@ internal sealed class ClientState : IDisposable
     public ChannelWriter<TransportBuffer> OutboundWriter => _outboundChannel.Writer;
 
     public Action? OnWritesComplete { get; init; }
-
-    public ClientState(Stream stream, PipeMode direction = PipeMode.Bidirectional)
-    {
-        Stream = stream;
-        Direction = direction;
-        InboundPipe = new Pipe(InboundPipeOptions);
-        OutboundPipe = new Pipe(OutboundPipeOptions);
-        _inboundChannel = Channel.CreateUnbounded<TransportBuffer>(ChannelOptions);
-        _outboundChannel = Channel.CreateUnbounded<TransportBuffer>(ChannelOptions);
-    }
 
     public void Dispose()
     {

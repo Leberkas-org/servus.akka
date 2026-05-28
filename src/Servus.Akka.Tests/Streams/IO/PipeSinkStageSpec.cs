@@ -333,57 +333,48 @@ public sealed class PipeSinkStageSpec : TestKit
             Writer = new CompletedResultPipeWriter(_pipe.Writer, this);
         }
 
-        private sealed class CompletedResultPipeWriter : PipeWriter
+        private sealed class CompletedResultPipeWriter(PipeWriter inner, CompletedFlushResultPipe owner) : PipeWriter
         {
-            private readonly PipeWriter _inner;
-            private readonly CompletedFlushResultPipe _owner;
-
-            public CompletedResultPipeWriter(PipeWriter inner, CompletedFlushResultPipe owner)
-            {
-                _inner = inner;
-                _owner = owner;
-            }
-
             public override void Advance(int bytes)
             {
-                _inner.Advance(bytes);
+                inner.Advance(bytes);
             }
 
             public override Memory<byte> GetMemory(int sizeHint = 0)
             {
-                return _inner.GetMemory(sizeHint);
+                return inner.GetMemory(sizeHint);
             }
 
             public override Span<byte> GetSpan(int sizeHint = 0)
             {
-                return _inner.GetSpan(sizeHint);
+                return inner.GetSpan(sizeHint);
             }
 
             public override ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer,
                 CancellationToken cancellationToken = default)
             {
-                _owner.WriteWasCalled = true;
+                owner.WriteWasCalled = true;
                 return new ValueTask<FlushResult>(new FlushResult(isCompleted: true, isCanceled: false));
             }
 
             public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
             {
-                return await _inner.FlushAsync(cancellationToken);
+                return await inner.FlushAsync(cancellationToken);
             }
 
             public override void CancelPendingFlush()
             {
-                _inner.CancelPendingFlush();
+                inner.CancelPendingFlush();
             }
 
             public override void Complete(Exception? exception = null)
             {
-                _inner.Complete(exception);
+                inner.Complete(exception);
             }
 
             public override async ValueTask CompleteAsync(Exception? exception = null)
             {
-                await _inner.CompleteAsync(exception);
+                await inner.CompleteAsync(exception);
             }
         }
     }
@@ -400,57 +391,48 @@ public sealed class PipeSinkStageSpec : TestKit
             Writer = new CanceledResultPipeWriter(_pipe.Writer, this);
         }
 
-        private sealed class CanceledResultPipeWriter : PipeWriter
+        private sealed class CanceledResultPipeWriter(PipeWriter inner, CanceledFlushResultPipe owner) : PipeWriter
         {
-            private readonly PipeWriter _inner;
-            private readonly CanceledFlushResultPipe _owner;
-
-            public CanceledResultPipeWriter(PipeWriter inner, CanceledFlushResultPipe owner)
-            {
-                _inner = inner;
-                _owner = owner;
-            }
-
             public override void Advance(int bytes)
             {
-                _inner.Advance(bytes);
+                inner.Advance(bytes);
             }
 
             public override Memory<byte> GetMemory(int sizeHint = 0)
             {
-                return _inner.GetMemory(sizeHint);
+                return inner.GetMemory(sizeHint);
             }
 
             public override Span<byte> GetSpan(int sizeHint = 0)
             {
-                return _inner.GetSpan(sizeHint);
+                return inner.GetSpan(sizeHint);
             }
 
             public override ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer,
                 CancellationToken cancellationToken = default)
             {
-                _owner.WriteWasCalled = true;
+                owner.WriteWasCalled = true;
                 return new ValueTask<FlushResult>(new FlushResult(isCompleted: false, isCanceled: true));
             }
 
             public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
             {
-                return await _inner.FlushAsync(cancellationToken);
+                return await inner.FlushAsync(cancellationToken);
             }
 
             public override void CancelPendingFlush()
             {
-                _inner.CancelPendingFlush();
+                inner.CancelPendingFlush();
             }
 
             public override void Complete(Exception? exception = null)
             {
-                _inner.Complete(exception);
+                inner.Complete(exception);
             }
 
             public override async ValueTask CompleteAsync(Exception? exception = null)
             {
-                await _inner.CompleteAsync(exception);
+                await inner.CompleteAsync(exception);
             }
         }
     }
@@ -467,60 +449,51 @@ public sealed class PipeSinkStageSpec : TestKit
             Writer = new SyncPipeWriter(_pipe.Writer, this);
         }
 
-        private sealed class SyncPipeWriter : PipeWriter
+        private sealed class SyncPipeWriter(PipeWriter inner, SynchronousWritePipe owner) : PipeWriter
         {
-            private readonly PipeWriter _inner;
-            private readonly SynchronousWritePipe _owner;
-
-            public SyncPipeWriter(PipeWriter inner, SynchronousWritePipe owner)
-            {
-                _inner = inner;
-                _owner = owner;
-            }
-
             public override void Advance(int bytes)
             {
-                _inner.Advance(bytes);
+                inner.Advance(bytes);
             }
 
             public override Memory<byte> GetMemory(int sizeHint = 0)
             {
-                return _inner.GetMemory(sizeHint);
+                return inner.GetMemory(sizeHint);
             }
 
             public override Span<byte> GetSpan(int sizeHint = 0)
             {
-                return _inner.GetSpan(sizeHint);
+                return inner.GetSpan(sizeHint);
             }
 
             public override ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer,
                 CancellationToken cancellationToken = default)
             {
-                _owner.WriteWasCalled = true;
-                var span = _inner.GetSpan(buffer.Length);
+                owner.WriteWasCalled = true;
+                var span = inner.GetSpan(buffer.Length);
                 buffer.Span.CopyTo(span);
-                _inner.Advance(buffer.Length);
+                inner.Advance(buffer.Length);
                 return new ValueTask<FlushResult>(new FlushResult(isCompleted: false, isCanceled: false));
             }
 
             public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
             {
-                return await _inner.FlushAsync(cancellationToken);
+                return await inner.FlushAsync(cancellationToken);
             }
 
             public override void CancelPendingFlush()
             {
-                _inner.CancelPendingFlush();
+                inner.CancelPendingFlush();
             }
 
             public override void Complete(Exception? exception = null)
             {
-                _inner.Complete(exception);
+                inner.Complete(exception);
             }
 
             public override async ValueTask CompleteAsync(Exception? exception = null)
             {
-                await _inner.CompleteAsync(exception);
+                await inner.CompleteAsync(exception);
             }
         }
     }
@@ -539,63 +512,52 @@ public sealed class PipeSinkStageSpec : TestKit
             Writer = new SlowPipeWriter(_pipe.Writer, this, delayMs);
         }
 
-        private sealed class SlowPipeWriter : PipeWriter
+        private sealed class SlowPipeWriter(PipeWriter inner, SlowWritePipe owner, int delayMs) : PipeWriter
         {
-            private readonly PipeWriter _inner;
-            private readonly SlowWritePipe _owner;
-            private readonly int _delayMs;
-
-            public SlowPipeWriter(PipeWriter inner, SlowWritePipe owner, int delayMs)
-            {
-                _inner = inner;
-                _owner = owner;
-                _delayMs = delayMs;
-            }
-
             public override void Advance(int bytes)
             {
-                _inner.Advance(bytes);
+                inner.Advance(bytes);
             }
 
             public override Memory<byte> GetMemory(int sizeHint = 0)
             {
-                return _inner.GetMemory(sizeHint);
+                return inner.GetMemory(sizeHint);
             }
 
             public override Span<byte> GetSpan(int sizeHint = 0)
             {
-                return _inner.GetSpan(sizeHint);
+                return inner.GetSpan(sizeHint);
             }
 
             public override async ValueTask<FlushResult> WriteAsync(ReadOnlyMemory<byte> buffer,
                 CancellationToken cancellationToken = default)
             {
-                _owner.WriteWasCalled = true;
-                await Task.Delay(_delayMs, cancellationToken);
-                var span = _inner.GetSpan(buffer.Length);
+                owner.WriteWasCalled = true;
+                await Task.Delay(delayMs, cancellationToken);
+                var span = inner.GetSpan(buffer.Length);
                 buffer.Span.CopyTo(span);
-                _inner.Advance(buffer.Length);
+                inner.Advance(buffer.Length);
                 return new FlushResult(isCompleted: false, isCanceled: false);
             }
 
             public override async ValueTask<FlushResult> FlushAsync(CancellationToken cancellationToken = default)
             {
-                return await _inner.FlushAsync(cancellationToken);
+                return await inner.FlushAsync(cancellationToken);
             }
 
             public override void CancelPendingFlush()
             {
-                _inner.CancelPendingFlush();
+                inner.CancelPendingFlush();
             }
 
             public override void Complete(Exception? exception = null)
             {
-                _inner.Complete(exception);
+                inner.Complete(exception);
             }
 
             public override async ValueTask CompleteAsync(Exception? exception = null)
             {
-                await _inner.CompleteAsync(exception);
+                await inner.CompleteAsync(exception);
             }
         }
     }

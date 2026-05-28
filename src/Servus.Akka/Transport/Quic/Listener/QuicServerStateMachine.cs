@@ -3,15 +3,14 @@ using Akka.Actor;
 
 namespace Servus.Akka.Transport.Quic.Listener;
 
-internal sealed class QuicServerStateMachine
+internal sealed class QuicServerStateMachine(
+    ITransportOperations ops,
+    IActorRef self,
+    QuicConnectionHandle connectionHandle,
+    ConnectionInfo connectionInfo)
 {
     private const string MigrationCheckTimerKey = "migration-check";
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
-
-    private readonly ITransportOperations _ops;
-    private readonly IActorRef _self;
-    private readonly QuicConnectionHandle _connectionHandle;
-    private readonly ConnectionInfo _connectionInfo;
 
     private int _connectionGen;
     private bool _upstreamFinished;
@@ -20,28 +19,16 @@ internal sealed class QuicServerStateMachine
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
     private QuicPumpManager? _pumpManager;
 
-    public QuicServerStateMachine(
-        ITransportOperations ops,
-        IActorRef self,
-        QuicConnectionHandle connectionHandle,
-        ConnectionInfo connectionInfo)
-    {
-        _ops = ops;
-        _self = self;
-        _connectionHandle = connectionHandle;
-        _connectionInfo = connectionInfo;
-    }
-
     public void Start()
     {
         _connectionGen++;
-        _lastRemoteEndPoint = _connectionHandle.RemoteEndPoint();
-        _ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
+        _lastRemoteEndPoint = connectionHandle.RemoteEndPoint();
+        ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
 
-        _pumpManager = new QuicPumpManager(_self);
-        _pumpManager.StartAcceptLoop(_connectionHandle);
+        _pumpManager = new QuicPumpManager(self);
+        _pumpManager.StartAcceptLoop(connectionHandle);
 
-        _ops.OnPushInbound(new TransportConnected(_connectionInfo));
+        ops.OnPushInbound(new TransportConnected(connectionInfo));
     }
 
     internal void Dispatch(IQuicTransportEvent evt)
@@ -51,7 +38,7 @@ internal sealed class QuicServerStateMachine
             case InboundData e:
                 if (e.Gen == _connectionGen)
                 {
-                    _ops.OnPushInbound(new MultiplexedData(e.Buffer, StreamTarget.FromId(e.StreamId)));
+                    ops.OnPushInbound(new MultiplexedData(e.Buffer, StreamTarget.FromId(e.StreamId)));
                 }
                 else
                 {
@@ -74,13 +61,13 @@ internal sealed class QuicServerStateMachine
                 OnInboundComplete(DisconnectReason.Error, e.StreamId);
                 break;
             case OutboundWriteDone:
-                _ops.OnSignalPullOutbound();
+                ops.OnSignalPullOutbound();
                 break;
             case OutboundWriteFailed:
                 HandleConnectionFailure(DisconnectReason.Error);
                 break;
             case MigrationDetected e:
-                _ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
+                ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
                 break;
         }
     }
@@ -103,7 +90,7 @@ internal sealed class QuicServerStateMachine
                 break;
             case DisconnectTransport:
                 Cleanup();
-                _ops.OnCompleteStage();
+                ops.OnCompleteStage();
                 break;
         }
     }
@@ -112,7 +99,7 @@ internal sealed class QuicServerStateMachine
     {
         _upstreamFinished = true;
         _pumpManager?.StopAll();
-        _ops.OnCompleteStage();
+        ops.OnCompleteStage();
     }
 
     public void HandleDownstreamFinish()
@@ -125,13 +112,13 @@ internal sealed class QuicServerStateMachine
         if (timerKey == MigrationCheckTimerKey)
         {
             CheckForConnectionMigration();
-            _ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
+            ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
         }
     }
 
     public void PostStop()
     {
-        _ops.OnCancelTimer(MigrationCheckTimerKey);
+        ops.OnCancelTimer(MigrationCheckTimerKey);
         Cleanup();
     }
 
@@ -141,12 +128,12 @@ internal sealed class QuicServerStateMachine
         _streams[streamId] = state;
 
         var sid = streamId.Value;
-        _connectionHandle.OpenStreamAsync(direction)
-            .PipeTo(_self,
+        connectionHandle.OpenStreamAsync(direction)
+            .PipeTo(self,
                 success: result => new StreamLeaseAcquired(new StreamHandle(result.Stream), sid),
                 failure: ex => new AcquisitionFailed(ex));
 
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void HandleMultiplexedData(MultiplexedData data)
@@ -160,7 +147,7 @@ internal sealed class QuicServerStateMachine
             data.Buffer.Dispose();
         }
 
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void HandleCompleteWrites(StreamTarget streamId)
@@ -170,7 +157,7 @@ internal sealed class QuicServerStateMachine
             state.CompleteWrites();
         }
 
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void HandleResetStream(StreamTarget streamId, long errorCode)
@@ -179,10 +166,10 @@ internal sealed class QuicServerStateMachine
         {
             state.Abort(errorCode);
             _ = state.DisposeAsync();
-            _ops.OnPushInbound(new StreamClosed(streamId, DisconnectReason.Error));
+            ops.OnPushInbound(new StreamClosed(streamId, DisconnectReason.Error));
         }
 
-        _ops.OnSignalPullOutbound();
+        ops.OnSignalPullOutbound();
     }
 
     private void OnStreamLeaseAcquired(StreamHandle handle, long rawStreamId)
@@ -196,7 +183,7 @@ internal sealed class QuicServerStateMachine
 
         state.AttachHandle(handle);
         _pumpManager?.StartInboundPump(handle, rawStreamId, _connectionGen);
-        _ops.OnPushInbound(new StreamOpened(streamId, state.Direction));
+        ops.OnPushInbound(new StreamOpened(streamId, state.Direction));
     }
 
     private void OnInboundStreamAccepted(Stream stream, long rawStreamId)
@@ -208,7 +195,7 @@ internal sealed class QuicServerStateMachine
         _streams[streamId] = state;
 
         _pumpManager?.StartInboundPump(handle, rawStreamId, _connectionGen);
-        _ops.OnPushInbound(new ServerStreamAccepted(streamId, StreamDirection.Unidirectional));
+        ops.OnPushInbound(new ServerStreamAccepted(streamId, StreamDirection.Unidirectional));
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)
@@ -229,13 +216,13 @@ internal sealed class QuicServerStateMachine
                 _ = state.DisposeAsync();
             }
 
-            _ops.OnPushInbound(new StreamReadCompleted(streamId));
+            ops.OnPushInbound(new StreamReadCompleted(streamId));
         }
         else
         {
             _streams.Remove(streamId);
             _ = state.DisposeAsync();
-            _ops.OnPushInbound(new StreamClosed(streamId, reason));
+            ops.OnPushInbound(new StreamClosed(streamId, reason));
         }
     }
 
@@ -243,28 +230,28 @@ internal sealed class QuicServerStateMachine
     {
         foreach (var (target, state) in _streams)
         {
-            _ops.OnPushInbound(new StreamClosed(target, reason));
+            ops.OnPushInbound(new StreamClosed(target, reason));
             _ = state.DisposeAsync();
         }
 
         _streams.Clear();
 
-        _ops.OnPushInbound(new TransportDisconnected(reason));
+        ops.OnPushInbound(new TransportDisconnected(reason));
         _pumpManager?.StopAll();
 
         if (_upstreamFinished)
         {
-            _ops.OnCompleteStage();
+            ops.OnCompleteStage();
         }
         else
         {
-            _ops.OnSignalPullOutbound();
+            ops.OnSignalPullOutbound();
         }
     }
 
     private void CheckForConnectionMigration()
     {
-        var currentRemote = _connectionHandle.RemoteEndPoint();
+        var currentRemote = connectionHandle.RemoteEndPoint();
         if (currentRemote is null || _lastRemoteEndPoint is null)
         {
             return;
@@ -274,7 +261,7 @@ internal sealed class QuicServerStateMachine
         {
             var old = _lastRemoteEndPoint;
             _lastRemoteEndPoint = currentRemote;
-            _ops.OnPushInbound(new ConnectionMigrationDetected(old, currentRemote));
+            ops.OnPushInbound(new ConnectionMigrationDetected(old, currentRemote));
         }
     }
 
@@ -291,6 +278,6 @@ internal sealed class QuicServerStateMachine
 
         _streams.Clear();
 
-        _ = _connectionHandle.DisposeAsync();
+        _ = connectionHandle.DisposeAsync();
     }
 }

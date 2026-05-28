@@ -4,15 +4,9 @@ using Servus.Akka.Transport.Tcp.Client;
 
 namespace Servus.Akka.Transport.Tcp;
 
-internal sealed class TcpPumpManager
+internal sealed class TcpPumpManager(IActorRef self)
 {
-    private readonly IActorRef _self;
     private CancellationTokenSource? _pumpsCts;
-
-    public TcpPumpManager(IActorRef self)
-    {
-        _self = self;
-    }
 
     public void StartPumps(ClientState state, int gen)
     {
@@ -25,7 +19,7 @@ internal sealed class TcpPumpManager
         _ = RunInboundPump(state, gen, ct);
         _ = ClientByteMover.MoveChannelToStream(state, () =>
         {
-            _self.Tell(new OutboundWriteDone(gen));
+            self.Tell(new OutboundWriteDone(gen));
         }, ct);
     }
 
@@ -55,7 +49,7 @@ internal sealed class TcpPumpManager
 
                 if (count > 0)
                 {
-                    _self.Tell(new InboundBatch(batch, count, gen));
+                    self.Tell(new InboundBatch(batch, count, gen));
                 }
                 else
                 {
@@ -69,10 +63,10 @@ internal sealed class TcpPumpManager
         }
         catch (Exception ex)
         {
-            _self.Tell(new InboundPumpFailed(ex));
+            self.Tell(new InboundPumpFailed(ex));
             return;
         }
 
-        _self.Tell(new InboundComplete(closeKind, gen));
+        self.Tell(new InboundComplete(closeKind, gen));
     }
 }

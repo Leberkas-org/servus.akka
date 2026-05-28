@@ -2,17 +2,12 @@ using System.Text;
 
 namespace Servus.Akka.Tests.Utils;
 
-public sealed class MockProxyStream : Stream
+public sealed class MockProxyStream(string response) : Stream
 {
-    private readonly byte[] _responseBytes;
+    private readonly byte[] _responseBytes = Encoding.ASCII.GetBytes(response);
     private readonly MemoryStream _writeBuffer = new();
     private int _readPosition;
     private bool _responseWritten;
-
-    public MockProxyStream(string response)
-    {
-        _responseBytes = Encoding.ASCII.GetBytes(response);
-    }
 
     public override bool CanRead => true;
     public override bool CanSeek => false;
