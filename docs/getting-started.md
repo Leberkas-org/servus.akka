@@ -1,7 +1,5 @@
 # Getting Started
 
-*Servus! Schee, dass du da bist.* 🥨
-
 **Servus.Akka** packages practical quality-of-life helpers for Akka.NET applications: easier actor registration, DI integration for `IActorRef`, trace-aware messaging, and startup containers.
 
 ## Installation
@@ -53,4 +51,4 @@ builder.Services.AddAkka("servus", akka =>
 
 ---
 
-**Pfiat di und happy coding!** 🥨🍺
+**Servus and happy coding!** 🥨🍺

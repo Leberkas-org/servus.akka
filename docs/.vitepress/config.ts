@@ -109,7 +109,7 @@ export default defineConfig({
       ]
     },
     footer: {
-      message: 'Pfiat di und happy coding! 🥨🍺',
+      message: 'Servus and happy coding! 🥨🍺',
       copyright: '© 2026 Leberkas.org · MIT License'
     },
     notFound: {

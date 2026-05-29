@@ -12,6 +12,7 @@
   "devDependencies": {
     "@fontsource/fraunces": "^5.2.9",
     "@fontsource/inter": "^5.2.8",
+    "@fontsource/vollkorn": "^5.2.10",
     "vitepress": "^1.6.4"
   }
 }

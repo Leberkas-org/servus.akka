@@ -1,81 +1,239 @@
+/* ============================================================
+   SERVUS.AKKA — ALPINE FILZ THEME
+   Forest green, felt gray, Bavarian blue — the colors of
+   Loden fabric, Filzhut felt, and Alpine woodland.
+   ============================================================ */
+
+/* ═══ Color Tokens ═══ */
 :root {
-  --vp-c-brand-1: #123C73;
-  --vp-c-brand-2: #2A5FA8;
-  --vp-c-brand-3: #1A4889;
-  --vp-c-brand-soft: #E8F0FB;
+  --bavaria-blue-deep: #0B3D91;
+  --bavaria-blue: #1A5FB4;
+  --bavaria-blue-light: #5B8FD4;
+  --bavaria-blue-mist: rgba(11, 61, 145, 0.06);
 
-  --bavaria-blue: #0066B3;
-  --bavaria-blue-soft: rgba(0, 102, 179, 0.08);
+  --loden: #3A6B4A;
+  --loden-light: #4F8A62;
+  --loden-deep: #1B4332;
+  --loden-soft: rgba(58, 107, 74, 0.10);
 
-  --vp-button-brand-bg: #123C73;
-  --vp-button-brand-hover-bg: #2A5FA8;
-  --vp-button-brand-active-bg: #1A4889;
-  --vp-button-brand-border: #123C73;
-  --vp-button-brand-hover-border: #2A5FA8;
-  --vp-button-brand-active-border: #1A4889;
+  --filz: #F4F3EF;
+  --filz-deep: #E9E7E1;
+  --filz-warm: #DDDAD3;
 
-  --vp-font-family-base: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --slate-dark: #1A1F1C;
+  --slate: #5A6158;
+  --slate-mist: rgba(90, 97, 88, 0.06);
+
+  /* VitePress core */
+  --vp-c-bg: var(--filz);
+  --vp-c-bg-soft: var(--filz-deep);
+  --vp-c-bg-alt: #EEECEA;
+  --vp-c-bg-elv: #FFFFFF;
+
+  --vp-c-brand-1: var(--loden);
+  --vp-c-brand-2: var(--loden-light);
+  --vp-c-brand-3: var(--loden-deep);
+  --vp-c-brand-soft: var(--loden-soft);
+
+  --vp-c-text-1: var(--slate-dark);
+  --vp-c-text-2: var(--slate);
+
+  --vp-c-border: rgba(90, 97, 88, 0.12);
+  --vp-c-divider: rgba(90, 97, 88, 0.08);
+  --vp-c-gutter: var(--filz-deep);
+
+  /* Buttons */
+  --vp-button-brand-bg: var(--loden);
+  --vp-button-brand-hover-bg: var(--loden-light);
+  --vp-button-brand-active-bg: var(--loden-deep);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-text: #FAFAFA;
+
+  --vp-button-alt-bg: var(--filz-deep);
+  --vp-button-alt-hover-bg: var(--filz-warm);
+  --vp-button-alt-border: rgba(58, 107, 74, 0.3);
+  --vp-button-alt-text: var(--loden-deep);
+  --vp-button-alt-hover-border: var(--loden);
+  --vp-button-alt-hover-text: var(--loden-deep);
+
+  /* Callouts */
+  --vp-c-tip-1: var(--loden);
+  --vp-c-tip-soft: rgba(58, 107, 74, 0.08);
+  --vp-c-warning-1: #B8860B;
+  --vp-c-warning-soft: rgba(184, 134, 11, 0.08);
+  --vp-c-danger-1: #B83E3E;
+  --vp-c-danger-soft: rgba(184, 62, 62, 0.08);
+
+  /* Typography */
+  --vp-font-family-base: 'Vollkorn', 'Georgia', 'Cambria', 'Times New Roman', serif;
   --vp-font-family-heading: 'Fraunces', 'Georgia', serif;
 
+  /* Hero */
   --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: linear-gradient(120deg, #123C73 30%, #0066B3);
-  --vp-home-hero-image-background-image: linear-gradient(-45deg, #123C73 30%, #0066B3);
-  --vp-home-hero-image-filter: blur(60px);
+  --vp-home-hero-name-background: linear-gradient(135deg, var(--loden-deep) 30%, var(--loden) 60%, var(--loden-light) 100%);
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+
+  /* Sidebar */
+  --vp-sidebar-bg-color: var(--filz);
+
+  /* Code */
+  --vp-code-block-bg: #EDECE8;
+  --vp-code-line-highlight-color: rgba(58, 107, 74, 0.08);
+
+  /* Custom tokens */
+  --wirtshaus-shadow-sm: 0 2px 8px rgba(26, 31, 28, 0.06);
+  --wirtshaus-shadow: 0 4px 20px rgba(26, 31, 28, 0.08);
+  --wirtshaus-shadow-lg: 0 8px 32px rgba(26, 31, 28, 0.12);
+  --wirtshaus-radius: 12px;
+
+  /* Mountain fill colors */
+  --alps-back: rgba(11, 61, 145, 0.06);
+  --alps-mid: rgba(58, 107, 74, 0.05);
+  --alps-front: var(--filz);
 }
 
+/* ═══ Dunkler Wald (Dark Mode) ═══ */
 .dark {
-  --vp-c-brand-1: #3B7DD8;
-  --vp-c-brand-2: #5A97E6;
-  --vp-c-brand-3: #2F6BC2;
-  --vp-c-brand-soft: rgba(59, 125, 216, 0.16);
+  --bavaria-blue-deep: #5B9AE0;
+  --bavaria-blue: #7BB3F0;
+  --bavaria-blue-light: #9DCBFF;
+  --bavaria-blue-mist: rgba(91, 154, 224, 0.1);
 
-  --bavaria-blue: #4DA3E6;
-  --bavaria-blue-soft: rgba(77, 163, 230, 0.1);
+  --loden: #7A9B87;
+  --loden-light: #96B3A2;
+  --loden-deep: #5A8069;
+  --loden-soft: rgba(122, 155, 135, 0.12);
 
-  --vp-button-brand-bg: #3B7DD8;
-  --vp-button-brand-hover-bg: #5A97E6;
-  --vp-button-brand-active-bg: #2F6BC2;
-  --vp-button-brand-border: #3B7DD8;
-  --vp-button-brand-hover-border: #5A97E6;
-  --vp-button-brand-active-border: #2F6BC2;
+  --filz: #161616;
+  --filz-deep: #1C1C1C;
+  --filz-warm: #262626;
 
-  --vp-home-hero-name-background: linear-gradient(120deg, #5A97E6 30%, #4DA3E6);
+  --slate-dark: #DEE0DD;
+  --slate: #8A8E8C;
+  --slate-mist: rgba(138, 142, 140, 0.06);
+
+  --vp-c-bg: #161616;
+  --vp-c-bg-soft: #1C1C1C;
+  --vp-c-bg-alt: #1A1A1A;
+  --vp-c-bg-elv: #262626;
+
+  --vp-c-text-1: #DEE0DD;
+  --vp-c-text-2: #8A8E8C;
+
+  --vp-c-border: rgba(222, 224, 221, 0.1);
+  --vp-c-divider: rgba(222, 224, 221, 0.06);
+  --vp-c-gutter: #1C1C1C;
+
+  --vp-button-brand-bg: var(--loden);
+  --vp-button-brand-hover-bg: var(--loden-light);
+  --vp-button-brand-active-bg: var(--loden-deep);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-active-border: transparent;
+
+  --vp-button-alt-bg: #252A27;
+  --vp-button-alt-hover-bg: #2E3430;
+  --vp-button-alt-border: rgba(92, 184, 120, 0.2);
+  --vp-button-alt-text: #8A8E8C;
+  --vp-button-alt-hover-text: #DEE0DD;
+
+  --vp-c-tip-1: #7A9B87;
+  --vp-c-tip-soft: rgba(122, 155, 135, 0.1);
+  --vp-c-warning-1: #D4A020;
+  --vp-c-warning-soft: rgba(212, 160, 32, 0.1);
+  --vp-c-danger-1: #E06060;
+  --vp-c-danger-soft: rgba(224, 96, 96, 0.1);
+
+  --vp-home-hero-name-background: linear-gradient(135deg, var(--loden-light) 30%, var(--loden) 60%, var(--loden-deep) 100%);
+
+  --vp-sidebar-bg-color: #161616;
+
+  --vp-code-block-bg: #121212;
+  --vp-code-line-highlight-color: rgba(92, 184, 120, 0.06);
+
+  --wirtshaus-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
+  --wirtshaus-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  --wirtshaus-shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.4);
+
+  --alps-back: rgba(91, 154, 224, 0.06);
+  --alps-mid: rgba(38, 38, 38, 0.6);
+  --alps-front: #161616;
 }
 
+/* ═══ Typography ═══ */
 h1, h2, h3, h4, h5, h6,
 .VPHero .name,
 .VPHero .text,
 .VPFeature .title {
   font-family: var(--vp-font-family-heading);
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
   font-weight: 700;
 }
 
 .VPFooter .message,
 .VPFooter .copyright {
-  font-family: var(--vp-font-family-heading);
-  font-weight: 600;
+  font-weight: 500;
 }
 
+/* ═══ Body: Felt Texture Atmosphere ═══ */
+body {
+  background:
+    radial-gradient(ellipse at 20% 50%, rgba(58, 107, 74, 0.025) 0%, transparent 60%),
+    radial-gradient(ellipse at 80% 20%, rgba(11, 61, 145, 0.02) 0%, transparent 50%),
+    var(--vp-c-bg);
+}
+
+.dark body {
+  background: var(--vp-c-bg);
+}
+
+/* ═══ Scrollbar ═══ */
+html {
+  scrollbar-color: rgba(58, 107, 74, 0.3) var(--vp-c-bg);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: var(--vp-c-bg); }
+::-webkit-scrollbar-thumb { background: rgba(58, 107, 74, 0.25); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--loden); }
+
+/* ═══ Navigation ═══ */
+.VPNav {
+  border-bottom-color: var(--vp-c-border) !important;
+}
+
+.VPNavBar .title {
+  font-family: var(--vp-font-family-heading) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+}
+
+/* ═══ Hero Section ═══ */
 .VPHome .VPHero {
   position: relative;
   overflow: hidden;
+  padding-bottom: 2rem;
 }
 
+/* Rautenmuster (Bavarian diamond pattern) overlay */
 .VPHome .VPHero::before {
   content: '';
   position: absolute;
   inset: 0;
-  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cpolygon points='40,0 80,40 40,80 0,40' fill='%230066B3'/%3E%3C/svg%3E");
-  background-size: 80px 80px;
-  background-repeat: repeat;
-  opacity: 0.045;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cpolygon points='30,0 60,30 30,60 0,30' fill='%230B3D91' /%3E%3C/svg%3E");
+  background-size: 60px 60px;
+  opacity: 0.04;
   pointer-events: none;
   z-index: 0;
 }
 
 .dark .VPHome .VPHero::before {
-  opacity: 0.08;
+  background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60'%3E%3Cpolygon points='30,0 60,30 30,60 0,30' fill='%235B9AE0' /%3E%3C/svg%3E");
+  opacity: 0.06;
 }
 
 .VPHome .VPHero .container {
@@ -83,34 +241,299 @@ h1, h2, h3, h4, h5, h6,
   z-index: 1;
 }
 
+/* Hero typography */
+.VPHero .text {
+  font-family: var(--vp-font-family-base) !important;
+  color: var(--slate) !important;
+}
+
+.VPHero .tagline {
+  font-family: var(--vp-font-family-base) !important;
+  font-style: italic;
+  color: var(--slate) !important;
+}
+
+/* Hero buttons */
+.VPHero .actions .VPButton.brand {
+  border-radius: 8px;
+  font-family: var(--vp-font-family-heading);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 14px rgba(58, 107, 74, 0.2);
+}
+
+.VPHero .actions .VPButton.brand:hover {
+  box-shadow: 0 6px 20px rgba(58, 107, 74, 0.3);
+  transform: translateY(-1px);
+}
+
+.VPHero .actions .VPButton.alt {
+  border-radius: 8px;
+  font-family: var(--vp-font-family-heading);
+  font-weight: 600;
+  border: 2px solid rgba(58, 107, 74, 0.3) !important;
+  transition: all 0.3s ease;
+}
+
+.VPHero .actions .VPButton.alt:hover {
+  border-color: var(--loden) !important;
+  background: var(--loden-soft) !important;
+  transform: translateY(-1px);
+}
+
+.dark .VPHero .actions .VPButton.brand {
+  box-shadow: 0 4px 14px rgba(122, 155, 135, 0.15);
+}
+
+.dark .VPHero .actions .VPButton.brand:hover {
+  box-shadow: 0 6px 20px rgba(122, 155, 135, 0.25);
+}
+
+/* ═══ Feature Cards (Filz-Bierdeckel) ═══ */
+.VPFeatures {
+  position: relative;
+  z-index: 3;
+}
+
+/* Loden-blue divider above features */
+.VPHome .VPFeatures::before {
+  content: '';
+  display: block;
+  width: 160px;
+  height: 2px;
+  margin: 0 auto 2.5rem;
+  background: linear-gradient(90deg, transparent, var(--loden-deep), var(--loden), var(--loden-deep), transparent);
+  border-radius: 2px;
+}
+
 .VPFeature {
-  border-top: 3px solid var(--bavaria-blue) !important;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  border: 1px solid rgba(58, 107, 74, 0.12) !important;
+  border-top: 3px solid var(--loden) !important;
+  border-radius: var(--wirtshaus-radius) !important;
+  background: var(--vp-c-bg-elv) !important;
+  box-shadow: var(--wirtshaus-shadow-sm);
+  transition: all 0.35s cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 .VPFeature:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 24px var(--bavaria-blue-soft);
+  transform: translateY(-4px);
+  box-shadow: var(--wirtshaus-shadow-lg);
+  border-color: rgba(58, 107, 74, 0.25) !important;
+  border-top-color: var(--loden) !important;
 }
 
 .VPFeature .icon {
-  font-size: 2.5rem !important;
-  background-color: var(--bavaria-blue-soft) !important;
-  width: 64px !important;
-  height: 64px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 68px !important;
+  height: 68px !important;
+  border-radius: 50% !important;
+  background: var(--slate-mist) !important;
+  border: 2px solid rgba(90, 97, 88, 0.1) !important;
+  font-size: 1.8rem !important;
+  margin-bottom: 1rem !important;
+  transition: all 0.35s ease;
 }
 
+.VPFeature:hover .icon {
+  border-color: rgba(90, 97, 88, 0.2) !important;
+  transform: scale(1.05);
+}
+
+.VPFeature .title {
+  color: var(--vp-c-text-1) !important;
+  font-weight: 700 !important;
+}
+
+.VPFeature .details {
+  color: var(--slate) !important;
+  line-height: 1.65 !important;
+}
+
+/* ═══ Sidebar ═══ */
+.VPSidebar {
+  border-right-color: var(--vp-c-border) !important;
+}
+
+.VPSidebarItem.level-0 > .item > .text {
+  font-family: var(--vp-font-family-heading);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--loden-deep) !important;
+}
+
+.dark .VPSidebarItem.level-0 > .item > .text {
+  color: var(--loden) !important;
+}
+
+.VPSidebarItem.is-active > .item > .indicator {
+  background-color: var(--loden) !important;
+}
+
+.VPSidebarItem.is-active > .item > .link > .text {
+  color: var(--loden) !important;
+}
+
+.VPSidebarItem .item .link:hover .text {
+  color: var(--loden) !important;
+}
+
+/* ═══ Content Area ═══ */
 .vp-doc a:not(.header-anchor) {
+  color: var(--loden);
+  text-decoration: underline;
   text-underline-offset: 3px;
-  text-decoration-color: var(--bavaria-blue);
+  text-decoration-color: rgba(58, 107, 74, 0.3);
   text-decoration-thickness: 2px;
+  transition: all 0.2s ease;
 }
 
+.vp-doc a:not(.header-anchor):hover {
+  text-decoration-color: var(--loden);
+  color: var(--loden-light);
+}
+
+/* Loden diamond accent on h2 */
+.vp-doc h2 {
+  border-top-color: var(--vp-c-border);
+  padding-top: 1.5rem;
+}
+
+
+/* List markers */
+.vp-doc ul > li::marker {
+  color: var(--loden);
+}
+
+.vp-doc ol > li::marker {
+  color: var(--loden);
+  font-weight: 600;
+}
+
+/* Code blocks */
+.vp-doc [class*="language-"] {
+  border-radius: 10px !important;
+  border: 1px solid var(--vp-c-border);
+}
+
+/* Inline code — loden-tinted */
+.vp-doc :not(pre) > code {
+  background-color: var(--loden-soft) !important;
+  color: var(--loden-deep) !important;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.88em;
+}
+
+.dark .vp-doc :not(pre) > code {
+  background-color: rgba(92, 184, 120, 0.1) !important;
+  color: var(--loden-light) !important;
+}
+
+/* Custom blocks / callouts */
+.vp-doc .custom-block {
+  border-radius: 10px;
+}
+
+/* Tables */
+.vp-doc table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.vp-doc th {
+  background-color: var(--loden-soft) !important;
+  font-family: var(--vp-font-family-heading);
+  font-weight: 600;
+}
+
+/* ═══ Footer — Bayerische Rauten (Blue & White) ═══ */
+.VPFooter {
+  border-top: none !important;
+  position: relative;
+  background: var(--vp-c-bg-soft) !important;
+  overflow: hidden;
+}
+
+.VPFooter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-top: 1.5px solid rgba(11, 61, 145, 0.35);
+  border-bottom: 1.5px solid rgba(11, 61, 145, 0.35);
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(11, 61, 145, 0.55) 0px,
+    rgba(11, 61, 145, 0.55) 24px,
+    rgba(255, 255, 255, 0.75) 24px,
+    rgba(255, 255, 255, 0.75) 48px
+  );
+}
+
+.dark .VPFooter::before {
+  border-top-color: rgba(255, 255, 255, 0.3);
+  border-bottom-color: rgba(255, 255, 255, 0.3);
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(91, 154, 224, 0.55) 0px,
+    rgba(91, 154, 224, 0.55) 24px,
+    rgba(255, 255, 255, 0.65) 24px,
+    rgba(255, 255, 255, 0.65) 48px
+  );
+}
+
+.VPFooter .message {
+  font-size: 1.1rem;
+}
+
+/* ═══ 404 Page ═══ */
 .NotFound .code {
   font-family: var(--vp-font-family-heading);
+  color: var(--loden) !important;
 }
 
 .NotFound .title {
   font-family: var(--vp-font-family-heading);
-  letter-spacing: -0.015em;
+  letter-spacing: -0.02em;
+}
+
+/* ═══ Entrance Animations ═══ */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Hero staggered reveal */
+.VPHero .name { animation: fadeInUp 0.7s ease-out both; }
+.VPHero .text { animation: fadeInUp 0.7s ease-out 0.1s both; }
+.VPHero .tagline { animation: fadeInUp 0.7s ease-out 0.2s both; }
+.VPHero .actions { animation: fadeInUp 0.7s ease-out 0.35s both; }
+.VPHero .image { animation: fadeIn 1s ease-out 0.2s both; }
+
+/* Feature card staggered reveal */
+.VPFeatures .item:nth-child(1) .VPFeature { animation: fadeInUp 0.6s ease-out 0.45s both; }
+.VPFeatures .item:nth-child(2) .VPFeature { animation: fadeInUp 0.6s ease-out 0.6s both; }
+.VPFeatures .item:nth-child(3) .VPFeature { animation: fadeInUp 0.6s ease-out 0.75s both; }
+
+/* ═══ Reduced Motion ═══ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
