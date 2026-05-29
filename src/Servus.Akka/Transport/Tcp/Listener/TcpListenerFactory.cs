@@ -5,7 +5,7 @@ namespace Servus.Akka.Transport.Tcp.Listener;
 
 public sealed class TcpListenerFactory : IListenerFactory
 {
-    public Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task> Bind(ListenerOptions options)
+    public Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task<int>> Bind(ListenerOptions options)
     {
         if (options is not TcpListenerOptions tcpOptions)
         {

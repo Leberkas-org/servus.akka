@@ -5,7 +5,7 @@ namespace Servus.Akka.Transport.Quic.Listener;
 
 public sealed class QuicListenerFactory : IListenerFactory
 {
-    public Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task> Bind(ListenerOptions options)
+    public Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task<int>> Bind(ListenerOptions options)
     {
         if (options is not QuicListenerOptions quicOptions)
         {

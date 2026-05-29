@@ -5,5 +5,5 @@ namespace Servus.Akka.Transport;
 
 public interface IListenerFactory
 {
-    Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task> Bind(ListenerOptions options);
+    Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task<int>> Bind(ListenerOptions options);
 }

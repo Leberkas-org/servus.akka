@@ -18,7 +18,7 @@ internal sealed record QuicAcceptFailed(Exception Error);
 internal sealed record QuicListenerBound(QuicListener Listener);
 
 internal sealed class QuicListenerStage
-    : GraphStageWithMaterializedValue<SourceShape<Flow<ITransportOutbound, ITransportInbound, NotUsed>>, Task>
+    : GraphStageWithMaterializedValue<SourceShape<Flow<ITransportOutbound, ITransportInbound, NotUsed>>, Task<int>>
 {
     private readonly QuicListenerOptions _options;
 
@@ -33,24 +33,24 @@ internal sealed class QuicListenerStage
         Shape = new SourceShape<Flow<ITransportOutbound, ITransportInbound, NotUsed>>(_out);
     }
 
-    public override ILogicAndMaterializedValue<Task> CreateLogicAndMaterializedValue(
+    public override ILogicAndMaterializedValue<Task<int>> CreateLogicAndMaterializedValue(
         Attributes inheritedAttributes)
     {
-        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        return new LogicAndMaterializedValue<Task>(new Logic(this, tcs), tcs.Task);
+        var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        return new LogicAndMaterializedValue<Task<int>>(new Logic(this, tcs), tcs.Task);
     }
 
     [ExcludeFromCodeCoverage]
     private sealed class Logic : GraphStageLogic
     {
         private readonly QuicListenerStage _stage;
-        private readonly TaskCompletionSource _boundSignal;
+        private readonly TaskCompletionSource<int> _boundSignal;
         private readonly Queue<Flow<ITransportOutbound, ITransportInbound, NotUsed>> _pendingConnections = new();
         private QuicListener? _listener;
         private IActorRef _self = null!;
         private CancellationTokenSource? _cts;
 
-        public Logic(QuicListenerStage stage, TaskCompletionSource boundSignal) : base(stage.Shape)
+        public Logic(QuicListenerStage stage, TaskCompletionSource<int> boundSignal) : base(stage.Shape)
         {
             _stage = stage;
             _boundSignal = boundSignal;
@@ -84,6 +84,7 @@ internal sealed class QuicListenerStage
 
             while (_pendingConnections.TryDequeue(out _))
             {
+                // noop
             }
         }
 
@@ -149,7 +150,7 @@ internal sealed class QuicListenerStage
             {
                 case QuicListenerBound bound:
                     _listener = bound.Listener;
-                    _boundSignal.TrySetResult();
+                    _boundSignal.TrySetResult(_listener.LocalEndPoint.Port);
                     _ = AcceptLoopAsync(_listener, _self, _cts!.Token);
                     break;
                 case QuicConnectionAccepted accepted:

@@ -10,11 +10,11 @@ namespace Servus.Akka.Transport;
 
 public static class TransportFactory
 {
-    public static Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task> CreateTcpListener(
+    public static Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task<int>> CreateTcpListener(
         TcpListenerOptions options)
         => new TcpListenerFactory().Bind(options);
 
-    public static Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task> CreateQuicListener(
+    public static Source<Flow<ITransportOutbound, ITransportInbound, NotUsed>, Task<int>> CreateQuicListener(
         QuicListenerOptions options)
         => new QuicListenerFactory().Bind(options);
 
