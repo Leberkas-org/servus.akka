@@ -14,7 +14,7 @@ hero:
       link: /getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/Bavaria-Black/servus.akka
+      link: https://github.com/Leberkas-org/servus.akka
 
 features:
   - icon: 🏔️
