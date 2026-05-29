@@ -102,10 +102,10 @@
   --bavaria-blue-light: #9DCBFF;
   --bavaria-blue-mist: rgba(91, 154, 224, 0.1);
 
-  --loden: #7A9B87;
-  --loden-light: #96B3A2;
-  --loden-deep: #5A8069;
-  --loden-soft: rgba(122, 155, 135, 0.12);
+  --loden: #5A9B6E;
+  --loden-light: #6DB380;
+  --loden-deep: #4B8A5E;
+  --loden-soft: rgba(90, 155, 110, 0.14);
 
   --filz: #161616;
   --filz-deep: #1C1C1C;
@@ -136,12 +136,12 @@
 
   --vp-button-alt-bg: #252A27;
   --vp-button-alt-hover-bg: #2E3430;
-  --vp-button-alt-border: rgba(92, 184, 120, 0.2);
+  --vp-button-alt-border: rgba(90, 170, 120, 0.2);
   --vp-button-alt-text: #8A8E8C;
   --vp-button-alt-hover-text: #DEE0DD;
 
-  --vp-c-tip-1: #7A9B87;
-  --vp-c-tip-soft: rgba(122, 155, 135, 0.1);
+  --vp-c-tip-1: #5A9B6E;
+  --vp-c-tip-soft: rgba(90, 155, 110, 0.1);
   --vp-c-warning-1: #D4A020;
   --vp-c-warning-soft: rgba(212, 160, 32, 0.1);
   --vp-c-danger-1: #E06060;
@@ -152,7 +152,7 @@
   --vp-sidebar-bg-color: #161616;
 
   --vp-code-block-bg: #121212;
-  --vp-code-line-highlight-color: rgba(92, 184, 120, 0.06);
+  --vp-code-line-highlight-color: rgba(90, 170, 120, 0.06);
 
   --wirtshaus-shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.2);
   --wirtshaus-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
@@ -430,7 +430,7 @@ html {
 }
 
 .dark .vp-doc :not(pre) > code {
-  background-color: rgba(92, 184, 120, 0.1) !important;
+  background-color: rgba(90, 170, 120, 0.1) !important;
   color: var(--loden-light) !important;
 }
 
