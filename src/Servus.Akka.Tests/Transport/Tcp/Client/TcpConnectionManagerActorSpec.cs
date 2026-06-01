@@ -1,5 +1,6 @@
 using Akka.Actor;
 using Akka.TestKit.Xunit;
+using Microsoft.Extensions.Time.Testing;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
@@ -39,6 +40,34 @@ public sealed class TcpConnectionManagerActorSpec : TestKit
         Assert.True(lease.IsAlive());
 
         lease.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Evict_should_remove_idle_connection_past_lifetime_with_injected_clock()
+    {
+        var clock = new FakeTimeProvider();
+        var factory = new InMemoryTcpConnectionFactory(clock);
+        var config = new TcpPoolConfig(
+            MaxConnectionsPerHost: 6,
+            IdleTimeout: TimeSpan.FromSeconds(5),
+            ConnectionLifetime: TimeSpan.FromMinutes(1),
+            ReuseOnUpstreamFinish: true);
+        var actor = Sys.ActorOf(TransportFactory.CreateTcpConnectionManager(factory, new PoolConfigRegistry(config)));
+        var options = CreateOptions();
+
+        var lease1 = await TcpConnectionManagerActor.AcquireAsync(actor, options, TestContext.Current.CancellationToken);
+        actor.Tell(new TcpConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        // Age the idle connection past its lifetime, then run the eviction sweep.
+        clock.Advance(TimeSpan.FromMinutes(2));
+        actor.Tell(TcpConnectionManagerActor.Evict.Instance);
+
+        var lease2 = await TcpConnectionManagerActor.AcquireAsync(actor, options, TestContext.Current.CancellationToken);
+
+        Assert.NotSame(lease1, lease2);
+        Assert.False(lease1.IsAlive());
+
+        lease2.Dispose();
     }
 
     [Fact(Timeout = 5000)]

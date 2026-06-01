@@ -1,4 +1,3 @@
-using System.Net.Security;
 using Servus.Akka.Transport;
 
 namespace Servus.Akka.Tests.Transport;

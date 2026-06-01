@@ -1,3 +1,4 @@
+using System.Buffers;
 using Servus.Akka.Transport;
 
 namespace Servus.Akka.Tests.Transport;
@@ -141,5 +142,69 @@ public sealed class TransportBufferSpec
         Assert.Equal(0xBE, buf.Span[3]);
 
         buf.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_should_bound_memory_and_span_by_length()
+    {
+        var buf = TransportBuffer.Wrap(new TrackingMemoryOwner(64), 10);
+
+        Assert.Equal(10, buf.Length);
+        Assert.Equal(10, buf.Memory.Length);
+        Assert.Equal(10, buf.Span.Length);
+
+        buf.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_should_expose_existing_data_without_copying()
+    {
+        var owner = new TrackingMemoryOwner(64);
+        owner.Memory.Span[0] = 0xAB;
+        owner.Memory.Span[1] = 0xCD;
+
+        var buf = TransportBuffer.Wrap(owner, 2);
+
+        Assert.Equal(0xAB, buf.Span[0]);
+        Assert.Equal(0xCD, buf.Span[1]);
+
+        buf.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_should_dispose_wrapped_owner_on_dispose()
+    {
+        var owner = new TrackingMemoryOwner(32);
+        var buf = TransportBuffer.Wrap(owner, 8);
+
+        Assert.False(owner.Disposed);
+
+        buf.Dispose();
+
+        Assert.True(owner.Disposed);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_should_return_wrapper_to_pool_on_dispose()
+    {
+        var first = TransportBuffer.Rent(64);
+        first.Dispose();
+
+        var buf = TransportBuffer.Wrap(new TrackingMemoryOwner(16), 4);
+
+        Assert.Same(first, buf);
+
+        buf.Dispose();
+    }
+
+    private sealed class TrackingMemoryOwner(int size) : IMemoryOwner<byte>
+    {
+        private readonly byte[] _array = new byte[size];
+
+        public bool Disposed { get; private set; }
+
+        public Memory<byte> Memory => _array;
+
+        public void Dispose() => Disposed = true;
     }
 }

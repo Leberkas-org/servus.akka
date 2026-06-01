@@ -7,7 +7,5 @@ namespace Servus.Akka.Streams.IO;
 public static class PipeSource
 {
     public static Source<ReadOnlyMemory<byte>, NotUsed> From(PipeReader reader)
-    {
-        return Source.FromGraph(new PipeSourceStage(reader));
-    }
+        => Source.FromGraph(new PipeSourceStage(reader));
 }

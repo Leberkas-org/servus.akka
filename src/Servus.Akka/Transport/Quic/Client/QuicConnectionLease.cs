@@ -1,15 +1,26 @@
 namespace Servus.Akka.Transport.Quic.Client;
 
-internal sealed class QuicConnectionLease(QuicConnectionHandle handle, int maxConcurrentStreams) : IAsyncDisposable
+internal sealed class QuicConnectionLease : IAsyncDisposable
 {
-    private readonly long _createdTicks = Environment.TickCount64;
+    private readonly TimeProvider _clock;
+    private readonly long _createdTicks;
+    private readonly int _maxConcurrentStreams;
     private bool _alive = true;
 
-    public QuicConnectionHandle Handle { get; } = handle;
+    public QuicConnectionLease(QuicConnectionHandle handle, int maxConcurrentStreams, TimeProvider? timeProvider = null)
+    {
+        Handle = handle;
+        _maxConcurrentStreams = maxConcurrentStreams;
+        _clock = timeProvider ?? TimeProvider.System;
+        _createdTicks = _clock.GetUtcNow().ToUnixTimeMilliseconds();
+        LastActivity = _clock.GetUtcNow().UtcDateTime;
+    }
+
+    public QuicConnectionHandle Handle { get; }
 
     public int ActiveStreams { get; private set; }
 
-    public DateTime LastActivity { get; private set; } = DateTime.UtcNow;
+    public DateTime LastActivity { get; private set; }
 
     public bool IsAlive() => _alive;
 
@@ -20,21 +31,21 @@ internal sealed class QuicConnectionLease(QuicConnectionHandle handle, int maxCo
             return false;
         }
 
-        return Environment.TickCount64 - _createdTicks > (long)maxLifetime.TotalMilliseconds;
+        return _clock.GetUtcNow().ToUnixTimeMilliseconds() - _createdTicks > (long)maxLifetime.TotalMilliseconds;
     }
 
-    public bool CanAcceptStream() => _alive && ActiveStreams < maxConcurrentStreams;
+    public bool CanAcceptStream() => _alive && ActiveStreams < _maxConcurrentStreams;
 
     public void MarkBusy()
     {
         ActiveStreams++;
-        LastActivity = DateTime.UtcNow;
+        LastActivity = _clock.GetUtcNow().UtcDateTime;
     }
 
     public void MarkIdle()
     {
         ActiveStreams--;
-        LastActivity = DateTime.UtcNow;
+        LastActivity = _clock.GetUtcNow().UtcDateTime;
     }
 
 

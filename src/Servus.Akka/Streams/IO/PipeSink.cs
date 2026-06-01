@@ -5,8 +5,5 @@ namespace Servus.Akka.Streams.IO;
 
 public static class PipeSink
 {
-    public static Sink<ReadOnlyMemory<byte>, Task> To(PipeWriter writer)
-    {
-        return Sink.FromGraph(new PipeSinkStage(writer));
-    }
+    public static Sink<ReadOnlyMemory<byte>, Task> To(PipeWriter writer) => Sink.FromGraph(new PipeSinkStage(writer));
 }

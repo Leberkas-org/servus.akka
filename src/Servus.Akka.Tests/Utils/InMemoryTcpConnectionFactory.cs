@@ -4,7 +4,7 @@ using Servus.Akka.Transport.Tcp.Client;
 
 namespace Servus.Akka.Tests.Utils;
 
-internal sealed class InMemoryTcpConnectionFactory : ITcpConnectionFactory
+internal sealed class InMemoryTcpConnectionFactory(TimeProvider? timeProvider = null) : ITcpConnectionFactory
 {
     private readonly List<ConnectionLease> _established = [];
 
@@ -17,7 +17,7 @@ internal sealed class InMemoryTcpConnectionFactory : ITcpConnectionFactory
         var state = new ClientState(Stream.Null);
         var cts = new CancellationTokenSource();
         var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        var lease = new ConnectionLease(handle, state, cts, ConnectionInfo.None);
+        var lease = new ConnectionLease(handle, state, cts, ConnectionInfo.None, timeProvider);
 
         _established.Add(lease);
         return Task.FromResult(lease);

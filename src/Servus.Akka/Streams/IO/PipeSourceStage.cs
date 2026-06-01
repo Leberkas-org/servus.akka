@@ -47,12 +47,6 @@ internal sealed class PipeSourceStage : GraphStage<SourceShape<ReadOnlyMemory<by
         {
             var vt = _stage._reader.ReadAsync();
 
-            if (vt.IsCompleted)
-            {
-                ProcessReadResult(vt.Result);
-                return;
-            }
-
             vt.PipeTo(_stageActor,
                 success: result => new ReadCompleted(result),
                 failure: ex => new ReadFailed(ex));

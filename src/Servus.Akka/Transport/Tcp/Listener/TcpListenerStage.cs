@@ -97,6 +97,7 @@ internal sealed class TcpListenerStage
 
             while (_pendingConnections.TryDequeue(out _))
             {
+                // noop
             }
         }
 

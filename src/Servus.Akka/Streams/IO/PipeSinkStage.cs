@@ -75,12 +75,6 @@ internal sealed class PipeSinkStage : GraphStageWithMaterializedValue<SinkShape<
 
             var vt = _stage._writer.WriteAsync(chunk);
 
-            if (vt.IsCompleted)
-            {
-                ProcessFlushResult(vt.Result);
-                return;
-            }
-
             _ = vt.PipeTo(_stageActor,
                 success: result => new FlushCompleted(result),
                 failure: ex => new FlushFailed(ex));
