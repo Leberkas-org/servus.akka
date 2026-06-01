@@ -128,11 +128,11 @@ public sealed class DynamicHubSpec : TestKit
             .Run(Sys.Materializer());
 
         var down = hub.Source(0).RunWith(this.SinkProbe<int>(), Sys.Materializer());
+        down.Request(1);
 
         up.SendNext(90, TestContext.Current.CancellationToken);
         up.SendComplete(TestContext.Current.CancellationToken);
 
-        down.Request(1);
         Assert.Equal(90, down.ExpectNext(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken));
         down.ExpectComplete(TestContext.Current.CancellationToken);
     }
