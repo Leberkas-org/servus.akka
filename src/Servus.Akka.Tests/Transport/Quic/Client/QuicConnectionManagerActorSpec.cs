@@ -1,5 +1,6 @@
 using Akka.Actor;
 using Akka.TestKit.Xunit;
+using Microsoft.Extensions.Time.Testing;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Quic.Client;
@@ -284,6 +285,32 @@ public sealed class QuicConnectionManagerActorSpec : TestKit
 
         Assert.Same(lease1, lease2);
         Assert.Equal(1, factory.EstablishCount);
+
+        await lease2.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Evict_should_remove_idle_lease_past_lifetime_with_injected_clock()
+    {
+        var clock = new FakeTimeProvider();
+        var factory = new MockFactory(timeProvider: clock);
+        var actor = CreateActor(factory);
+        var options = CreateOptions();
+
+        var lease1 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        // Release so the lease is idle (ActiveStreams == 0), making it eligible for eviction.
+        actor.Tell(new QuicConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        // Age past the manager's idle-eviction window, then run the sweep.
+        clock.Advance(TimeSpan.FromMinutes(11));
+        actor.Tell(QuicConnectionManagerActor.Evict.Instance);
+
+        var lease2 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotSame(lease1, lease2);
+        Assert.Equal(2, factory.EstablishCount);
 
         await lease2.DisposeAsync();
     }

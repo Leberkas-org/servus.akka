@@ -36,7 +36,7 @@ internal sealed class SlowQuicConnectionFactory(TimeSpan delay) : IQuicConnectio
     }
 }
 
-internal sealed class MockFactory(bool shouldFail = false, int maxStreams = 100) : IQuicConnectionFactory
+internal sealed class MockFactory(bool shouldFail = false, int maxStreams = 100, TimeProvider? timeProvider = null) : IQuicConnectionFactory
 {
     private readonly int _maxStreams = maxStreams;
 
@@ -56,6 +56,6 @@ internal sealed class MockFactory(bool shouldFail = false, int maxStreams = 100)
             getLocalEndPoint: () => null,
             getRemoteEndPoint: () => null,
             dispose: () => ValueTask.CompletedTask);
-        return Task.FromResult(new QuicConnectionLease(handle, options.MaxBidirectionalStreams));
+        return Task.FromResult(new QuicConnectionLease(handle, options.MaxBidirectionalStreams, timeProvider));
     }
 }
