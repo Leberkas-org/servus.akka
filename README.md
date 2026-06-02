@@ -3,7 +3,7 @@
 > An Akka.NET quality of life extension library. Filled with features that you didn't know you actually missed ;)
 
 [![NuGet](https://img.shields.io/nuget/v/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
-[![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://docs.leberkas.org/servusakka)
+[![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://servus.akka.leberkas.org)
 [![License](https://img.shields.io/github/license/Bavaria-Black/servus.akka?style=flat-square)](LICENSE)
 [![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
 
