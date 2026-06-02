@@ -3,7 +3,7 @@
 > An Akka.NET quality of life extension library. Filled with features that you didn't know you actually missed ;)
 
 [![NuGet](https://img.shields.io/nuget/v/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
-[![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://docs.leberkas.org/servusakka)
+[![Docs](https://img.shields.io/badge/docs-leberkas.org-123C73?style=flat-square)](https://servus.akka.leberkas.org)
 [![License](https://img.shields.io/github/license/Bavaria-Black/servus.akka?style=flat-square)](LICENSE)
 [![Downloads](https://img.shields.io/nuget/dt/Servus.Akka.svg?style=flat-square)](https://www.nuget.org/packages/Servus.Akka/)
 
@@ -61,22 +61,6 @@ builder.Services.AddAkka("servus", b =>
 var a = Host.Services.GetService<IActorRef<ResolvingTestActor>>();
         a.Tell("hello");
 ```
-
-## Documentation
-
-- **[Documentation Home](docs/index.md)** - Overview of all modules and links
-- **[Getting Started Guide](docs/getting-started.md)** - First steps with Servus.Akka
-- **[Extensions](docs/modules/extensions/)** - Resolve/Register/Registry/Context/Akka options
-- **[Dependency Injection](docs/modules/dependency-injection/)** - `ActorRef<TActor>` and DI provider integration
-- **[Diagnostics](docs/modules/diagnostics/)** - Traced messaging and actor instrumentation
-- **[Messaging](docs/modules/messaging/)** - Envelope contracts for traced payloads
-- **[Startup](docs/modules/startup/)** - Startup containers for Akka system setup
-
-## Compatibility
-
-- **.NET**: 8.0+
-- **Akka.NET**: 1.5.0+
-- **Platforms**: Windows, Linux, macOS
 
 ## Contributing
 
