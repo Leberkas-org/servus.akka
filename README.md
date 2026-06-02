@@ -62,22 +62,6 @@ var a = Host.Services.GetService<IActorRef<ResolvingTestActor>>();
         a.Tell("hello");
 ```
 
-## Documentation
-
-- **[Documentation Home](docs/index.md)** - Overview of all modules and links
-- **[Getting Started Guide](docs/getting-started.md)** - First steps with Servus.Akka
-- **[Extensions](docs/modules/extensions/)** - Resolve/Register/Registry/Context/Akka options
-- **[Dependency Injection](docs/modules/dependency-injection/)** - `ActorRef<TActor>` and DI provider integration
-- **[Diagnostics](docs/modules/diagnostics/)** - Traced messaging and actor instrumentation
-- **[Messaging](docs/modules/messaging/)** - Envelope contracts for traced payloads
-- **[Startup](docs/modules/startup/)** - Startup containers for Akka system setup
-
-## Compatibility
-
-- **.NET**: 8.0+
-- **Akka.NET**: 1.5.0+
-- **Platforms**: Windows, Linux, macOS
-
 ## Contributing
 
 Contributions are welcome! This library grows with the community's needs.
