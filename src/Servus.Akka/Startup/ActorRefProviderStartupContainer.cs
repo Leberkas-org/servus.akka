@@ -1,6 +1,6 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Servus.Akka.DependencyInjection;
-using Servus.Core.Application.Startup;
+using Servus.Application.Startup;
 
 namespace Servus.Akka.Startup;
 
