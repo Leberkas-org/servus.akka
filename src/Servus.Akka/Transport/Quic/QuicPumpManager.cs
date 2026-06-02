@@ -62,36 +62,44 @@ internal sealed class QuicPumpManager(IActorRef self)
     private static async Task DirectStreamPumpAsync(StreamHandle handle, long streamId, CancellationToken ct,
         IActorRef self, int gen)
     {
+        const int minBufferSize = 4 * 1024;
+        const int maxBufferSize = 64 * 1024;
+
         var closeReason = DisconnectReason.Graceful;
-        var pool = MemoryPool<byte>.Shared;
+        var bufferSize = minBufferSize;
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var owner = pool.Rent(16384);
+                var tb = TransportBuffer.Rent(bufferSize);
                 int bytesRead;
                 try
                 {
-                    bytesRead = await handle.ReadAsync(owner.Memory, ct).ConfigureAwait(false);
+                    bytesRead = await handle.ReadAsync(tb.FullMemory, ct).ConfigureAwait(false);
                 }
                 catch
                 {
-                    owner.Dispose();
+                    tb.Dispose();
                     throw;
                 }
 
                 if (bytesRead == 0)
                 {
-                    owner.Dispose();
+                    tb.Dispose();
                     break;
                 }
 
-                var tb = TransportBuffer.Rent(bytesRead);
-                owner.Memory.Span[..bytesRead].CopyTo(tb.FullMemory.Span);
                 tb.Length = bytesRead;
-                owner.Dispose();
-
                 self.Tell(new InboundData(tb, streamId, gen));
+
+                if (bytesRead >= bufferSize * 3 / 4)
+                {
+                    bufferSize = Math.Min(bufferSize * 2, maxBufferSize);
+                }
+                else if (bytesRead <= bufferSize / 4 && bufferSize > minBufferSize)
+                {
+                    bufferSize = Math.Max(bufferSize / 2, minBufferSize);
+                }
             }
         }
         catch (OperationCanceledException)
