@@ -54,6 +54,29 @@ public sealed class TransportBuffer : IDisposable
         return buf;
     }
 
+    // Wraps an existing IMemoryOwner with an offset, slicing _owner.Memory to [offset..offset+length].
+    // Use for zero-copy frame emission when the frame header was written into headroom at 'offset'
+    // and the payload immediately follows it.
+    public static TransportBuffer Wrap(IMemoryOwner<byte> owner, int offset, int length)
+    {
+        var sliced = new SlicedMemoryOwner(owner, offset, length);
+        if (!Pool.TryPop(out var buf))
+        {
+            return new TransportBuffer { _owner = sliced, Length = length };
+        }
+
+        buf._owner = sliced;
+        buf.Length = length;
+        return buf;
+    }
+
+    private sealed class SlicedMemoryOwner(IMemoryOwner<byte> inner, int offset, int length) : IMemoryOwner<byte>
+    {
+        public Memory<byte> Memory { get; } = inner.Memory.Slice(offset, length);
+
+        public void Dispose() => inner.Dispose();
+    }
+
     public static implicit operator TransportBuffer(byte[] data)
     {
         var buf = Rent(data.Length);
