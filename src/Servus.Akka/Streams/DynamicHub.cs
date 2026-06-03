@@ -3,6 +3,7 @@ using Akka.Actor;
 using Akka.Streams;
 using Akka.Streams.Dsl;
 using Akka.Streams.Stage;
+using static Servus.Senf;
 
 namespace Servus.Akka.Streams;
 
@@ -112,11 +113,13 @@ public sealed class DynamicHub<TKey, T> : GraphStageWithMaterializedValue<SinkSh
             {
                 slot.Credit--;
                 slot.Source.Tell(new Deliver(element));
+                Tracing.For("Pipeline").Debug(this, "DynamicHub: key={0} delivered direct, totalBuffered={1}", key, _totalBuffered);
             }
             else
             {
                 slot.HubQueue.Enqueue(element);
                 _totalBuffered++;
+                Tracing.For("Pipeline").Debug(this, "DynamicHub: key={0} queued, totalBuffered={1}", key, _totalBuffered);
             }
 
             AfterStateChange();
@@ -166,11 +169,18 @@ public sealed class DynamicHub<TKey, T> : GraphStageWithMaterializedValue<SinkSh
 
         private void DrainSlot(ConsumerSlot slot)
         {
+            var drained = 0;
             while (slot.Source is not null && slot is { Credit: > 0, HubQueue.Count: > 0 })
             {
                 slot.Credit--;
                 _totalBuffered--;
+                drained++;
                 slot.Source.Tell(new Deliver(slot.HubQueue.Dequeue()));
+            }
+
+            if (drained > 0)
+            {
+                Tracing.For("Pipeline").Debug(this, "DynamicHub: drained={0}, totalBuffered={1}", drained, _totalBuffered);
             }
         }
 
