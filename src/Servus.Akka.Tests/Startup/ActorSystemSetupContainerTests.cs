@@ -2,7 +2,7 @@ using Akka.Actor;
 using Akka.Hosting;
 using Microsoft.Extensions.DependencyInjection;
 using Servus.Akka.Startup;
-using Servus.Core.Application.Startup;
+using Servus.Application.Startup;
 
 namespace Servus.Akka.Tests.Startup;
 
