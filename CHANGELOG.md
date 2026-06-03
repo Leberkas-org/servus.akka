@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.15](https://github.com/Leberkas-org/servus.akka/compare/v0.3.14...v0.3.15) (2026-06-03)
+
+
+### Features
+
+* Remove unused tracing extensions ([e4e5f86](https://github.com/Leberkas-org/servus.akka/commit/e4e5f862b04b525cfedb0faf2633d3adabc66f28))
+* Remove unused tracing extensions and add Servus ([#27](https://github.com/Leberkas-org/servus.akka/issues/27)) ([df3cad5](https://github.com/Leberkas-org/servus.akka/commit/df3cad56eb8381beb62db498443123a16322e025))
+
 ## [0.3.14](https://github.com/Leberkas-org/servus.akka/compare/v0.3.13...v0.3.14) (2026-06-02)
 
 
