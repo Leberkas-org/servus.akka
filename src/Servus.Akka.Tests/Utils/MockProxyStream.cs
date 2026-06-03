@@ -1,10 +1,10 @@
-using System.Text;
+using static System.Text.Encoding;
 
 namespace Servus.Akka.Tests.Utils;
 
 public sealed class MockProxyStream(string response) : Stream
 {
-    private readonly byte[] _responseBytes = Encoding.ASCII.GetBytes(response);
+    private readonly byte[] _responseBytes = ASCII.GetBytes(response);
     private readonly MemoryStream _writeBuffer = new();
     private int _readPosition;
     private bool _responseWritten;
@@ -84,6 +84,6 @@ public sealed class MockProxyStream(string response) : Stream
 
     public string GetRequestContent()
     {
-        return Encoding.ASCII.GetString(_writeBuffer.ToArray());
+        return ASCII.GetString(_writeBuffer.ToArray());
     }
 }

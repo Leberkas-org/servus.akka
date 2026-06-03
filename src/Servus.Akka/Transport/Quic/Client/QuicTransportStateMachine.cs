@@ -1,6 +1,6 @@
 using System.Net;
 using Akka.Actor;
-using static Servus.Core.Servus;
+using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Quic.Client;
 

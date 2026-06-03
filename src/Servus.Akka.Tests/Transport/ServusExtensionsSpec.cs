@@ -1,7 +1,6 @@
 using System.Diagnostics;
-using System.Diagnostics.Metrics;
 using Servus.Akka.Transport;
-using Servus.Core.Diagnostics;
+using Servus.Diagnostics;
 
 namespace Servus.Akka.Tests.Transport;
 
@@ -10,8 +9,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void DnsLookupDuration_should_create_histogram_on_first_call()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram1 = metrics.DnsLookupDuration();
 
@@ -22,8 +20,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void DnsLookupDuration_should_return_cached_histogram_on_second_call()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram1 = metrics.DnsLookupDuration();
         var histogram2 = metrics.DnsLookupDuration();
@@ -34,8 +31,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void DnsLookupDuration_should_create_histogram_with_correct_unit()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram = metrics.DnsLookupDuration();
 
@@ -45,8 +41,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void DnsLookupDuration_should_create_histogram_with_description()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram = metrics.DnsLookupDuration();
 
@@ -56,8 +51,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SocketConnectDuration_should_create_histogram_on_first_call()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram1 = metrics.SocketConnectDuration();
 
@@ -68,8 +62,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SocketConnectDuration_should_return_cached_histogram_on_second_call()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram1 = metrics.SocketConnectDuration();
         var histogram2 = metrics.SocketConnectDuration();
@@ -80,8 +73,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SocketConnectDuration_should_create_histogram_with_correct_unit()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram = metrics.SocketConnectDuration();
 
@@ -91,8 +83,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SocketConnectDuration_should_create_histogram_with_description()
     {
-        var meter = new Meter("test-meter");
-        var metrics = CreateServusMetrics(meter);
+        var metrics = CreateServusMetrics();
 
         var histogram = metrics.SocketConnectDuration();
 
@@ -102,8 +93,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartDnsLookup_should_return_null_when_no_listeners()
     {
-        var source = new ActivitySource("test-source");
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartDnsLookup("example.com");
 
@@ -113,11 +103,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartDnsLookup_should_return_activity_when_listeners_exist()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartDnsLookup("example.com");
 
@@ -130,11 +119,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartDnsLookup_should_set_hostname_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartDnsLookup("example.com");
 
@@ -146,11 +134,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartDnsLookup_should_set_different_hostnames()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity1 = trace.StartDnsLookup("example.com");
         var activity2 = trace.StartDnsLookup("test.org");
@@ -164,11 +151,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetDnsAnswers_should_set_answers_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -182,11 +168,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetDnsAnswers_should_set_answer_count_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -200,11 +185,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetDnsAnswers_should_handle_single_answer()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -219,11 +203,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetDnsAnswers_should_handle_empty_answers()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -238,8 +221,7 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_return_null_when_no_listeners()
     {
-        var source = new ActivitySource("test-source");
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 80, "tcp", "ipv4");
 
@@ -249,11 +231,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_return_activity_when_listeners_exist()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -266,11 +247,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_set_address_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -281,11 +261,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_set_port_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -296,11 +275,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_set_transport_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -311,11 +289,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_set_network_type_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -326,11 +303,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_handle_ipv6()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("::1", 443, "tcp", "ipv6");
 
@@ -343,11 +319,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_handle_hostname()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("example.com", 80, "tcp", "ipv4");
 
@@ -358,11 +333,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_handle_different_transports()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var tcpActivity = trace.StartSocketConnect("192.0.2.1", 80, "tcp", "ipv4");
         var udpActivity = trace.StartSocketConnect("192.0.2.1", 53, "udp", "ipv4");
@@ -376,15 +350,12 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void StartSocketConnect_should_return_null_when_source_starts_activity_returns_null()
     {
-        var source = new ActivitySource("test-source");
-        using var listener = new ActivityListener
-        {
-            ShouldListenTo = _ => true,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.None,
-        };
+        using var listener = new ActivityListener();
+        listener.ShouldListenTo = _ => true;
+        listener.Sample = (ref _) => ActivitySamplingResult.None;
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
 
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
 
@@ -394,11 +365,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_set_error_status()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -412,11 +382,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_set_error_status_description()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -430,11 +399,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_set_error_type_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -448,11 +416,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_set_exception_message_tag()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -466,11 +433,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_handle_different_exception_types()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartDnsLookup("example.com");
         Assert.NotNull(activity);
 
@@ -484,11 +450,10 @@ public sealed class ServusExtensionsSpec
     [Fact(Timeout = 5000)]
     public void SetError_should_work_on_socket_connect_activity()
     {
-        var source = new ActivitySource("test-source");
         using var listener = CreateActivityListener();
         ActivitySource.AddActivityListener(listener);
 
-        var trace = CreateServusTrace(source);
+        var trace = CreateServusTrace();
         var activity = trace.StartSocketConnect("192.0.2.1", 8080, "tcp", "ipv4");
         Assert.NotNull(activity);
 
@@ -501,7 +466,7 @@ public sealed class ServusExtensionsSpec
         activity.Dispose();
     }
 
-    private static ServusMetrics CreateServusMetrics(Meter _)
+    private static ServusMetrics CreateServusMetrics()
     {
         return (ServusMetrics)Activator.CreateInstance(
             typeof(ServusMetrics),
@@ -509,7 +474,7 @@ public sealed class ServusExtensionsSpec
             null, null, null)!;
     }
 
-    private static ServusTrace CreateServusTrace(ActivitySource _)
+    private static ServusTrace CreateServusTrace()
     {
         return (ServusTrace)Activator.CreateInstance(
             typeof(ServusTrace),
@@ -522,7 +487,7 @@ public sealed class ServusExtensionsSpec
         return new ActivityListener
         {
             ShouldListenTo = _ => true,
-            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllData,
+            Sample = (ref _) => ActivitySamplingResult.AllData,
         };
     }
 }

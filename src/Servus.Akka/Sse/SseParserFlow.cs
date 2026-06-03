@@ -57,7 +57,7 @@ internal sealed class SseParserStage : GraphStage<FlowShape<ReadOnlyMemory<byte>
                         }
                     }
 
-                    var text = Encoding.UTF8.GetString(bytes, startIndex, bytes.Length - startIndex);
+                    var text =  System.Text.Encoding.UTF8.GetString(bytes, startIndex, bytes.Length - startIndex);
                     ProcessText(text);
                     DrainPending(stage);
                 },

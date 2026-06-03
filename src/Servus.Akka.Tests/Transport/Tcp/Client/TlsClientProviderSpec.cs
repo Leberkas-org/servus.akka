@@ -1,6 +1,5 @@
 using System.Net;
 using System.Security.Authentication;
-using System.Text;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp.Client;
@@ -160,7 +159,7 @@ public sealed class TlsClientProviderSpec
         var requestContent = proxyStream.GetRequestContent();
         Assert.NotNull(requestContent);
 
-        var expectedEncoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("testuser:testpass"));
+        var expectedEncoded = Convert.ToBase64String("testuser:testpass"u8.ToArray());
         Assert.Contains($"Proxy-Authorization: Basic {expectedEncoded}", requestContent);
     }
 
@@ -201,7 +200,7 @@ public sealed class TlsClientProviderSpec
         var requestContent = proxyStream.GetRequestContent();
         Assert.NotNull(requestContent);
 
-        var expectedEncoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("defaultuser:defaultpass"));
+        var expectedEncoded = Convert.ToBase64String("defaultuser:defaultpass"u8.ToArray());
         Assert.Contains($"Proxy-Authorization: Basic {expectedEncoded}", requestContent);
     }
 
@@ -224,8 +223,8 @@ public sealed class TlsClientProviderSpec
         var requestContent = proxyStream.GetRequestContent();
         Assert.NotNull(requestContent);
 
-        var proxyEncoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("proxyuser:proxypass"));
-        var defaultEncoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("defaultuser:defaultpass"));
+        var proxyEncoded = Convert.ToBase64String("proxyuser:proxypass"u8.ToArray());
+        var defaultEncoded = Convert.ToBase64String("defaultuser:defaultpass"u8.ToArray());
 
         Assert.Contains($"Proxy-Authorization: Basic {proxyEncoded}", requestContent);
         Assert.DoesNotContain($"Proxy-Authorization: Basic {defaultEncoded}", requestContent);
@@ -442,7 +441,7 @@ public sealed class TlsClientProviderSpec
         );
 
         var requestContent = proxyStream.GetRequestContent();
-        var expectedEncoded = Convert.ToBase64String(Encoding.UTF8.GetBytes("user@domain:pass:word!"));
+        var expectedEncoded = Convert.ToBase64String("user@domain:pass:word!"u8.ToArray());
         Assert.Contains($"Proxy-Authorization: Basic {expectedEncoded}", requestContent);
     }
 }

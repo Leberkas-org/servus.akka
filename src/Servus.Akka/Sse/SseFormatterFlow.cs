@@ -51,7 +51,7 @@ public static class SseFormatterFlow
     {
         prefix.CopyTo(dest);
         var written = prefix.Length;
-        written += Encoding.UTF8.GetBytes(value, dest[written..]);
+        written +=  System.Text.Encoding.UTF8.GetBytes(value, dest[written..]);
         dest[written++] = Lf;
         return written;
     }
@@ -66,7 +66,8 @@ public static class SseFormatterFlow
         return written;
     }
 
-    private static void WriteLinesWithPrefix(byte[] buffer, ref int pos, ReadOnlySpan<byte> prefix, ReadOnlySpan<char> data)
+    private static void WriteLinesWithPrefix(byte[] buffer, ref int pos, ReadOnlySpan<byte> prefix,
+        ReadOnlySpan<char> data)
     {
         while (true)
         {
@@ -79,7 +80,7 @@ public static class SseFormatterFlow
                 break;
             }
 
-            pos += Encoding.UTF8.GetBytes(data[..nlIndex], buffer.AsSpan(pos));
+            pos += System.Text.Encoding.UTF8.GetBytes(data[..nlIndex], buffer.AsSpan(pos));
             buffer[pos++] = Lf;
 
             if (data[nlIndex] == '\r' && nlIndex + 1 < data.Length && data[nlIndex + 1] == '\n')
@@ -92,20 +93,20 @@ public static class SseFormatterFlow
             }
         }
 
-        pos += Encoding.UTF8.GetBytes(data, buffer.AsSpan(pos));
+        pos += System.Text.Encoding.UTF8.GetBytes(data, buffer.AsSpan(pos));
     }
 
     private static int EstimateSize(ServerSentEvent evt)
     {
-        var size = Encoding.UTF8.GetMaxByteCount(evt.Data.Length) + evt.Data.Length + 32;
+        var size = System.Text.Encoding.UTF8.GetMaxByteCount(evt.Data.Length) + evt.Data.Length + 32;
         if (evt.EventType is not null)
         {
-            size += Encoding.UTF8.GetMaxByteCount(evt.EventType.Length) + 10;
+            size += System.Text.Encoding.UTF8.GetMaxByteCount(evt.EventType.Length) + 10;
         }
 
         if (evt.Id is not null)
         {
-            size += Encoding.UTF8.GetMaxByteCount(evt.Id.Length) + 6;
+            size += System.Text.Encoding.UTF8.GetMaxByteCount(evt.Id.Length) + 6;
         }
 
         if (evt.Retry is not null)

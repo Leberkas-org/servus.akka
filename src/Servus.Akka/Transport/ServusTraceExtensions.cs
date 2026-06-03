@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using Servus.Core.Diagnostics;
+using Servus.Diagnostics;
 
 namespace Servus.Akka.Transport;
 

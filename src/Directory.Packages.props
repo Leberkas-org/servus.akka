@@ -8,7 +8,7 @@
     <ItemGroup Label="Servus.Akka">
         <PackageVersion Include="Akka.Hosting" Version="[1.5.68,)"/>
         <PackageVersion Include="Akka.Streams" Version="[1.5.68,)"/>
-        <PackageVersion Include="Servus.Core" Version="[0.33.10,)"/>
+        <PackageVersion Include="Servus" Version="[0.34.0,)"/>
         <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="[10.0.0,)"/>
     </ItemGroup>
 

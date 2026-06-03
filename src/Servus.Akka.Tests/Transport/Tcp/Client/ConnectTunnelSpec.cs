@@ -1,6 +1,5 @@
 using System.IO.Pipelines;
 using System.Net;
-using System.Text;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport.Tcp.Client;
 
@@ -137,19 +136,19 @@ public sealed class ConnectTunnelSpec
             }
 
             totalRead += read;
-            var text = Encoding.ASCII.GetString(buffer, 0, totalRead);
+            var text = System.Text.Encoding.ASCII.GetString(buffer, 0, totalRead);
             if (text.Contains("\r\n\r\n"))
             {
                 break;
             }
         }
 
-        return Encoding.ASCII.GetString(buffer, 0, totalRead);
+        return System.Text.Encoding.ASCII.GetString(buffer, 0, totalRead);
     }
 
     private static async Task WriteResponseAsync(Stream serverStream, string response)
     {
-        await serverStream.WriteAsync(Encoding.ASCII.GetBytes(response));
+        await serverStream.WriteAsync(System.Text.Encoding.ASCII.GetBytes(response));
         await serverStream.FlushAsync();
     }
 }

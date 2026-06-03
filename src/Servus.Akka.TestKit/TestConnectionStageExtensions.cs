@@ -1,4 +1,4 @@
-using System.Text;
+using static System.Text.Encoding;
 using Servus.Akka.Transport;
 
 namespace Servus.Akka.TestKit;
@@ -9,7 +9,7 @@ public static class TestConnectionStageExtensions
         => stage.PushInbound(new TransportData(data));
 
     public static void PushData(this TestConnectionStage stage, string text)
-        => stage.PushInbound(new TransportData(Encoding.UTF8.GetBytes(text)));
+        => stage.PushInbound(new TransportData( UTF8.GetBytes(text)));
 
     public static void PushDisconnected(this TestConnectionStage stage,
         DisconnectReason reason = DisconnectReason.Graceful)

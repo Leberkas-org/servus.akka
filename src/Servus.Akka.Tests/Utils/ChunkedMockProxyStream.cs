@@ -1,4 +1,4 @@
-using System.Text;
+using static System.Text.Encoding;
 
 namespace Servus.Akka.Tests.Utils;
 
@@ -20,7 +20,7 @@ public sealed class ChunkedMockProxyStream : Stream
             throw new ArgumentException("Chunk size must be greater than 0", nameof(chunkSize));
         }
 
-        _responseBytes = Encoding.ASCII.GetBytes(response);
+        _responseBytes = ASCII.GetBytes(response);
         _chunkSize = chunkSize;
     }
 
@@ -96,10 +96,5 @@ public sealed class ChunkedMockProxyStream : Stream
     public override void SetLength(long value)
     {
         throw new NotSupportedException();
-    }
-
-    public string GetRequestContent()
-    {
-        return Encoding.ASCII.GetString(_writeBuffer.ToArray());
     }
 }
