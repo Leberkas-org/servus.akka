@@ -22,6 +22,7 @@ public sealed class TcpConnectionStateMachine(
     private readonly Queue<TransportBuffer> _pendingWrites = new();
 
     private SequencePosition? _pendingAdvance;
+    private bool _readInProgress;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
@@ -39,6 +40,7 @@ public sealed class TcpConnectionStateMachine(
                 OnAcquisitionFailed(e.Error);
                 break;
             case PipeReadComplete e:
+                _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadComplete(e.Result);
@@ -46,6 +48,7 @@ public sealed class TcpConnectionStateMachine(
 
                 break;
             case PipeReadFailed e:
+                _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadFailed(e.Error);
@@ -119,10 +122,12 @@ public sealed class TcpConnectionStateMachine(
     public void RequestRead()
     {
         var connection = Connection;
-        if (connection is null)
+        if (connection is null || _readInProgress)
         {
             return;
         }
+
+        _readInProgress = true;
 
         if (_pendingAdvance is { } pos)
         {
@@ -313,6 +318,7 @@ public sealed class TcpConnectionStateMachine(
     {
         _connectionGen++;
         _pendingAdvance = null;
+        _readInProgress = false;
 
         _acquireCts?.Cancel();
         _acquireCts?.Dispose();
