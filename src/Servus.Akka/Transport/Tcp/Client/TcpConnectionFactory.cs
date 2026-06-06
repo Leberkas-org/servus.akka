@@ -44,10 +44,10 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
             protocol,
             security);
 
-        var state = new ClientState(stream);
+        var connection = SocketPipeConnection.Create(stream);
+        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        var lease = new ConnectionLease(handle, state, cts, info);
+        var lease = new ConnectionLease(connection, leaseTracker, cts, info);
 
         return lease;
     }

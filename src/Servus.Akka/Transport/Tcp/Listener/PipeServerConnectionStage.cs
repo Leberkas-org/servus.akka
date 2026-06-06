@@ -76,9 +76,8 @@ internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITranspor
         public override void PreStart()
         {
             var stageActor = GetStageActor(OnReceive);
-            var state = new ClientState(_stage._stream);
             _sm = new PipeServerStateMachine(
-                this, stageActor.Ref, state, _stage._connectionInfo,
+                this, stageActor.Ref, _stage._stream, _stage._connectionInfo,
                 _stage._sslStream, _stage._allowDelayedNegotiation);
             _sm.Start();
             Pull(_stage._in);

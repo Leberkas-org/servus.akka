@@ -7,19 +7,43 @@ public sealed class ConnectionLeaseSpec
 {
     private static ConnectionLease CreateLease()
     {
-        var state = new ClientState(Stream.Null);
+        var connection = SocketPipeConnection.Create(Stream.Null);
+        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        var lease = new ConnectionLease(handle, state, cts, ConnectionInfo.None);
+        var lease = new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
         return lease;
     }
 
     [Fact(Timeout = 5000)]
-    public void ConnectionLease_should_set_handle_from_constructor()
+    public void ConnectionLease_should_expose_connection()
     {
         var lease = CreateLease();
 
-        Assert.NotNull(lease.Handle);
+        Assert.NotNull(lease.Connection);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void ConnectionLease_should_expose_lease_tracker()
+    {
+        var lease = CreateLease();
+
+        Assert.NotNull(lease.LeaseTracker);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void ConnectionLease_should_expose_input_reader()
+    {
+        var lease = CreateLease();
+
+        Assert.NotNull(lease.InputReader);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void ConnectionLease_should_expose_output_writer()
+    {
+        var lease = CreateLease();
+
+        Assert.NotNull(lease.OutputWriter);
     }
 
     [Fact(Timeout = 5000)]
@@ -50,17 +74,11 @@ public sealed class ConnectionLeaseSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void ConnectionLease_should_dispose_stream_when_disposed()
+    public void CanReturn_should_be_true_when_no_segments_outstanding()
     {
-        var memStream = new MemoryStream();
-        var state = new ClientState(memStream);
-        var cts = new CancellationTokenSource();
-        var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        var lease = new ConnectionLease(handle, state, cts, ConnectionInfo.None);
+        var lease = CreateLease();
 
-        lease.Dispose();
-
-        Assert.Throws<ObjectDisposedException>(() => memStream.ReadByte());
+        Assert.True(lease.CanReturn);
     }
 
     [Fact(Timeout = 5000)]
@@ -114,17 +132,5 @@ public sealed class ConnectionLeaseSpec
         lease.Dispose();
 
         Assert.False(lease.IsAlive());
-    }
-
-    [Fact(Timeout = 5000)]
-    public void Handle_should_reflect_cancelled_state_after_dispose()
-    {
-        var lease = CreateLease();
-
-        Assert.False(lease.Handle.IsCancelled);
-
-        lease.Dispose();
-
-        Assert.True(lease.Handle.IsCancelled);
     }
 }

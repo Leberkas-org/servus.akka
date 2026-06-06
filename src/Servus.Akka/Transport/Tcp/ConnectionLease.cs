@@ -1,3 +1,5 @@
+using System.IO.Pipelines;
+
 namespace Servus.Akka.Transport.Tcp;
 
 internal sealed class ConnectionLease : IDisposable
@@ -7,21 +9,29 @@ internal sealed class ConnectionLease : IDisposable
     private readonly long _createdTicks;
     private bool _alive = true;
 
-    internal ConnectionLease(ConnectionHandle handle, ClientState state, CancellationTokenSource cts, ConnectionInfo info,
+    internal ConnectionLease(
+        SocketPipeConnection connection,
+        LeaseTracker leaseTracker,
+        CancellationTokenSource cts,
+        ConnectionInfo info,
         TimeProvider? timeProvider = null)
     {
-        Handle = handle;
-        State = state;
+        Connection = connection;
+        LeaseTracker = leaseTracker;
         _cts = cts;
         Info = info;
         _clock = timeProvider ?? TimeProvider.System;
         _createdTicks = _clock.GetUtcNow().ToUnixTimeMilliseconds();
     }
 
-    public ConnectionHandle Handle { get; }
+    public SocketPipeConnection Connection { get; }
+    public LeaseTracker LeaseTracker { get; }
     public ConnectionInfo Info { get; }
 
-    internal ClientState State { get; }
+    public PipeReader InputReader => Connection.InputReader;
+    public PipeWriter OutputWriter => Connection.OutputWriter;
+
+    public bool CanReturn => LeaseTracker.Outstanding == 0;
 
     public bool IsAlive() => _alive;
 
@@ -47,6 +57,7 @@ internal sealed class ConnectionLease : IDisposable
         _alive = false;
         _cts.Cancel();
         _cts.Dispose();
-        State.Dispose();
+        LeaseTracker.ForceReturnAll();
+        _ = Connection.DisposeAsync().AsTask();
     }
 }

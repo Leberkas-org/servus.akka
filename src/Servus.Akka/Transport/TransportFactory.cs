@@ -20,9 +20,8 @@ public static class TransportFactory
 
     public static Flow<ITransportOutbound, ITransportInbound, NotUsed> CreateTcpClient(
         IActorRef connectionManager,
-        IPoolingStrategy poolingStrategy,
-        bool usePipeTransport = false)
-        => new TcpTransportFactory(connectionManager, poolingStrategy, usePipeTransport).Create();
+        IPoolingStrategy poolingStrategy)
+        => new TcpTransportFactory(connectionManager, poolingStrategy).Create();
 
     public static Flow<ITransportOutbound, ITransportInbound, NotUsed> CreateQuicClient(IActorRef connectionManager)
         => new QuicTransportFactory(connectionManager).Create();

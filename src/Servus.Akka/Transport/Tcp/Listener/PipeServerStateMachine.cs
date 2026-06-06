@@ -9,7 +9,7 @@ namespace Servus.Akka.Transport.Tcp.Listener;
 internal sealed class PipeServerStateMachine(
     ITransportOperations ops,
     IActorRef self,
-    ClientState state,
+    Stream stream,
     ConnectionInfo connectionInfo,
     SslStream? sslStream = null,
     bool allowDelayedNegotiation = false)
@@ -23,7 +23,7 @@ internal sealed class PipeServerStateMachine(
     public void Start()
     {
         _connectionGen++;
-        _connection = SocketPipeConnection.Create(state.Stream);
+        _connection = SocketPipeConnection.Create(stream);
 
         if (sslStream is not null || allowDelayedNegotiation)
         {
@@ -174,7 +174,7 @@ internal sealed class PipeServerStateMachine(
         _leaseTracker.ForceReturnAll();
         DisposeConnection();
         _connection = null;
-        state.Dispose();
+        stream.Dispose();
     }
 
     private void DisposeConnection()

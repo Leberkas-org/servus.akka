@@ -30,10 +30,10 @@ public sealed class PipeTransportStateMachineSpec
 
     private static ConnectionLease CreateTestLease()
     {
-        var state = new ClientState(Stream.Null);
+        var connection = SocketPipeConnection.Create(Stream.Null);
+        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        return new ConnectionLease(handle, state, cts, ConnectionInfo.None);
+        return new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
     }
 
     private static TransportBuffer CreateTestBuffer(params byte[] data)

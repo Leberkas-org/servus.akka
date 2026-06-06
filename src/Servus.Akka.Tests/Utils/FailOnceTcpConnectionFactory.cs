@@ -17,9 +17,9 @@ internal sealed class FailOnceTcpConnectionFactory : ITcpConnectionFactory
             return Task.FromException<ConnectionLease>(new IOException("Simulated first-call connection failure"));
         }
 
-        var state = new ClientState(Stream.Null);
+        var connection = SocketPipeConnection.Create(Stream.Null);
+        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var handle = new ConnectionHandle(state.OutboundWriter, state.InboundReader, cts.Token);
-        return Task.FromResult(new ConnectionLease(handle, state, cts, ConnectionInfo.None));
+        return Task.FromResult(new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None));
     }
 }

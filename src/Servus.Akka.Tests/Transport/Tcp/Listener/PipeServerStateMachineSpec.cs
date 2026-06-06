@@ -18,8 +18,7 @@ public sealed class PipeServerStateMachineSpec
     private static (PipeServerStateMachine Sm, MockTransportOperations Ops) CreateStateMachine(Stream? stream = null)
     {
         var ops = new MockTransportOperations();
-        var state = new ClientState(stream ?? Stream.Null);
-        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, state, TestConnectionInfo);
+        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, stream ?? Stream.Null, TestConnectionInfo);
         return (sm, ops);
     }
 
@@ -47,8 +46,7 @@ public sealed class PipeServerStateMachineSpec
     public void Start_should_include_tls_info_when_allow_delayed_negotiation()
     {
         var ops = new MockTransportOperations();
-        var state = new ClientState(Stream.Null);
-        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, state, TestConnectionInfo,
+        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
             allowDelayedNegotiation: true);
 
         sm.Start();

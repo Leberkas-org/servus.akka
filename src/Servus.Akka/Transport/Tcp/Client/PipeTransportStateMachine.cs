@@ -13,7 +13,6 @@ public sealed class PipeTransportStateMachine(
 {
     private const string ConnectTimerKey = "connect-timeout";
 
-    private SocketPipeConnection? _connection;
     private ConnectionLease? _currentLease;
     private bool _leaseReturned;
     private int _connectionGen;
@@ -21,12 +20,13 @@ public sealed class PipeTransportStateMachine(
     private bool _autoReconnect;
 
     private readonly Queue<TransportBuffer> _pendingWrites = new();
-    private readonly LeaseTracker _leaseTracker = new(16);
 
     private SequencePosition? _pendingAdvance;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
+
+    private SocketPipeConnection? Connection => _currentLease?.Connection;
 
     internal void Dispatch(ITcpTransportEvent evt)
     {
@@ -72,17 +72,14 @@ public sealed class PipeTransportStateMachine(
     public void HandleUpstreamFinish()
     {
         _upstreamFinished = true;
-        if (_connection is null)
+        if (_currentLease is null)
         {
             ops.OnCompleteStage();
         }
         else if (_pendingWrites.Count == 0)
         {
             _connectionGen++;
-            DisposeConnection();
-            _leaseTracker.ForceReturnAll();
             ReturnLeaseToPool(poolingStrategy.OnUpstreamFinish(_currentLease!));
-            _connection = null;
             _currentLease = null;
             ops.OnCompleteStage();
         }
@@ -109,7 +106,6 @@ public sealed class PipeTransportStateMachine(
     public void PostStop()
     {
         ops.OnCancelTimer(ConnectTimerKey);
-        _leaseTracker.ForceReturnAll();
         CleanupTransport();
 
         while (_pendingWrites.TryDequeue(out var orphan))
@@ -120,7 +116,8 @@ public sealed class PipeTransportStateMachine(
 
     public void RequestRead()
     {
-        if (_connection is null)
+        var connection = Connection;
+        if (connection is null)
         {
             return;
         }
@@ -128,11 +125,11 @@ public sealed class PipeTransportStateMachine(
         if (_pendingAdvance is { } pos)
         {
             _pendingAdvance = null;
-            _connection.InputReader.AdvanceTo(pos);
+            connection.InputReader.AdvanceTo(pos);
         }
 
         var gen = _connectionGen;
-        _connection.InputReader.ReadAsync().AsTask().PipeTo(self,
+        connection.InputReader.ReadAsync().AsTask().PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
             failure: ex => new PipeReadFailed(ex, gen));
     }
@@ -157,7 +154,7 @@ public sealed class PipeTransportStateMachine(
 
     private void HandleTransportData(TransportData data)
     {
-        if (_connection is null)
+        if (_currentLease is null)
         {
             _pendingWrites.Enqueue(data.Buffer);
             ops.OnSignalPullOutbound();
@@ -182,7 +179,6 @@ public sealed class PipeTransportStateMachine(
         _connectionGen++;
         _leaseReturned = false;
         _currentLease = lease;
-        _connection = SocketPipeConnection.Create(lease.State.Stream);
 
         Tracing.For("Connection").Debug(this, "Pipe transport ready");
 
@@ -256,10 +252,7 @@ public sealed class PipeTransportStateMachine(
             }
 
             _leaseReturned = false;
-            _leaseTracker.ForceReturnAll();
             ReturnLeaseToPool(poolAction);
-            DisposeConnection();
-            _connection = null;
             _currentLease = null;
 
             ops.OnSignalPullOutbound();
@@ -269,10 +262,7 @@ public sealed class PipeTransportStateMachine(
         ops.OnPushInbound(new TransportDisconnected(reason));
 
         _leaseReturned = false;
-        _leaseTracker.ForceReturnAll();
         ReturnLeaseToPool(poolAction);
-        DisposeConnection();
-        _connection = null;
         _currentLease = null;
 
         if (_upstreamFinished)
@@ -321,8 +311,6 @@ public sealed class PipeTransportStateMachine(
     {
         _connectionGen++;
         _pendingAdvance = null;
-        _leaseTracker.ForceReturnAll();
-        DisposeConnection();
 
         _acquireCts?.Cancel();
         _acquireCts?.Dispose();
@@ -334,7 +322,6 @@ public sealed class PipeTransportStateMachine(
             ReturnLeaseToPool(PoolAction.Dispose);
             _currentLease.Dispose();
             _currentLease = null;
-            _connection = null;
         }
     }
 
@@ -342,7 +329,7 @@ public sealed class PipeTransportStateMachine(
     {
         while (_pendingWrites.TryDequeue(out var buffer))
         {
-            if (_connection is not null)
+            if (_currentLease is not null)
             {
                 WriteToOutputPipe(buffer);
             }
@@ -357,18 +344,11 @@ public sealed class PipeTransportStateMachine(
 
     private void WriteToOutputPipe(TransportBuffer data)
     {
-        var mem = _connection!.OutputWriter.GetMemory(data.Length);
+        var writer = _currentLease!.OutputWriter;
+        var mem = writer.GetMemory(data.Length);
         data.Memory.Span.CopyTo(mem.Span);
-        _connection.OutputWriter.Advance(data.Length);
+        writer.Advance(data.Length);
         data.Dispose();
-        _ = _connection.OutputWriter.FlushAsync();
-    }
-
-    private void DisposeConnection()
-    {
-        if (_connection is not null)
-        {
-            _ = _connection.DisposeAsync().AsTask();
-        }
+        _ = writer.FlushAsync();
     }
 }

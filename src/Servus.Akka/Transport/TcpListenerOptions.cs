@@ -15,5 +15,4 @@ public sealed record TcpListenerOptions : ListenerOptions
     public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(10);
     public ClientCertificateMode ClientCertificateMode { get; init; } = ClientCertificateMode.NoCertificate;
     public Func<string?, X509Certificate2?>? ServerCertificateSelector { get; init; }
-    public bool UsePipeTransport { get; init; }
 }
