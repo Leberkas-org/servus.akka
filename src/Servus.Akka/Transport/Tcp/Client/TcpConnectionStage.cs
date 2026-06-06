@@ -1,49 +1,39 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Security;
 using Akka.Actor;
 using Akka.Event;
 using Akka.Streams;
 using Akka.Streams.Stage;
 
-namespace Servus.Akka.Transport.Tcp.Listener;
+namespace Servus.Akka.Transport.Tcp.Client;
 
-internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITransportOutbound, ITransportInbound>>
+internal sealed class TcpConnectionStage : GraphStage<FlowShape<ITransportOutbound, ITransportInbound>>
 {
-    private readonly Stream _stream;
-    private readonly ConnectionInfo _connectionInfo;
-    private readonly SslStream? _sslStream;
-    private readonly bool _allowDelayedNegotiation;
+    private readonly IActorRef _connectionManager;
+    private readonly IPoolingStrategy _poolingStrategy;
 
-    private readonly Inlet<ITransportOutbound> _in = new("PipeServerConnection.In");
-    private readonly Outlet<ITransportInbound> _out = new("PipeServerConnection.Out");
+    private readonly Inlet<ITransportOutbound> _in = new("TcpConnection.In");
+    private readonly Outlet<ITransportInbound> _out = new("TcpConnection.Out");
 
     public override FlowShape<ITransportOutbound, ITransportInbound> Shape { get; }
 
-    public PipeServerConnectionStage(
-        Stream stream,
-        ConnectionInfo connectionInfo,
-        SslStream? sslStream = null,
-        bool allowDelayedNegotiation = false)
+    public TcpConnectionStage(IActorRef connectionManager, IPoolingStrategy poolingStrategy)
     {
-        _stream = stream;
-        _connectionInfo = connectionInfo;
-        _sslStream = sslStream;
-        _allowDelayedNegotiation = allowDelayedNegotiation;
+        _connectionManager = connectionManager;
+        _poolingStrategy = poolingStrategy;
         Shape = new FlowShape<ITransportOutbound, ITransportInbound>(_in, _out);
     }
 
-    protected override GraphStageLogic CreateLogic(Attributes inheritedAttributes)
-        => new Logic(this);
+    protected override GraphStageLogic CreateLogic(Attributes inheritedAttributes) => new Logic(this);
 
     [ExcludeFromCodeCoverage]
-    private sealed class Logic : TimerGraphStageLogic, ITransportOperations
+    private sealed class Logic : TimerGraphStageLogic, IConnectionOperations
     {
-        private readonly PipeServerConnectionStage _stage;
+        private readonly TcpConnectionStage _stage;
         private readonly Queue<ITransportInbound> _pendingReads = new();
-        private PipeServerStateMachine _sm = null!;
+        private TcpConnectionStateMachine _sm = null!;
         private bool _readRequested;
 
-        public Logic(PipeServerConnectionStage stage) : base(stage.Shape)
+        public Logic(TcpConnectionStage stage) : base(stage.Shape)
         {
             _stage = stage;
 
@@ -76,10 +66,11 @@ internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITranspor
         public override void PreStart()
         {
             var stageActor = GetStageActor(OnReceive);
-            _sm = new PipeServerStateMachine(
-                this, stageActor.Ref, _stage._stream, _stage._connectionInfo,
-                _stage._sslStream, _stage._allowDelayedNegotiation);
-            _sm.Start();
+            _sm = new TcpConnectionStateMachine(
+                this,
+                _stage._connectionManager,
+                _stage._poolingStrategy,
+                stageActor.Ref);
             Pull(_stage._in);
         }
 
@@ -91,11 +82,11 @@ internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITranspor
             }
         }
 
-        protected override void OnTimer(object timerKey) { }
+        protected override void OnTimer(object timerKey) => _sm.OnTimer(timerKey as string);
 
         public override void PostStop() => _sm.PostStop();
 
-        void ITransportOperations.OnPushInbound(ITransportInbound item)
+        void IConnectionOperations.OnPushInbound(ITransportInbound item)
         {
             _readRequested = false;
 
@@ -109,7 +100,7 @@ internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITranspor
             }
         }
 
-        void ITransportOperations.OnSignalPullOutbound()
+        void IConnectionOperations.OnSignalPullOutbound()
         {
             if (!IsClosed(_stage._in) && !HasBeenPulled(_stage._in))
             {
@@ -117,13 +108,12 @@ internal sealed class PipeServerConnectionStage : GraphStage<FlowShape<ITranspor
             }
         }
 
-        void ITransportOperations.OnCompleteStage() => CompleteStage();
+        void IConnectionOperations.OnCompleteStage() => CompleteStage();
 
-        void ITransportOperations.OnScheduleTimer(string key, TimeSpan delay)
-            => ScheduleOnce(key, delay);
+        void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay) => ScheduleOnce(key, delay);
 
-        void ITransportOperations.OnCancelTimer(string key) => CancelTimer(key);
+        void IConnectionOperations.OnCancelTimer(string key) => CancelTimer(key);
 
-        ILoggingAdapter ITransportOperations.Log => Log;
+        ILoggingAdapter IConnectionOperations.Log => Log;
     }
 }

@@ -25,7 +25,7 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
         => new Logic(this);
 
     [ExcludeFromCodeCoverage]
-    private sealed class Logic : TimerGraphStageLogic, ITransportOperations
+    private sealed class Logic : TimerGraphStageLogic, IConnectionOperations
     {
         private readonly QuicConnectionStage _stage;
         private readonly Queue<ITransportInbound> _pendingReads = new();
@@ -81,7 +81,7 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
 
         public override void PostStop() => _sm.PostStop();
 
-        void ITransportOperations.OnPushInbound(ITransportInbound item)
+        void IConnectionOperations.OnPushInbound(ITransportInbound item)
         {
             if (IsAvailable(_stage._out))
             {
@@ -93,7 +93,7 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
             }
         }
 
-        void ITransportOperations.OnSignalPullOutbound()
+        void IConnectionOperations.OnSignalPullOutbound()
         {
             if (!IsClosed(_stage._in) && !HasBeenPulled(_stage._in))
             {
@@ -101,15 +101,15 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
             }
         }
 
-        void ITransportOperations.OnCompleteStage()
+        void IConnectionOperations.OnCompleteStage()
             => CompleteStage();
 
-        void ITransportOperations.OnScheduleTimer(string key, TimeSpan delay)
+        void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay)
             => ScheduleOnce(key, delay);
 
-        void ITransportOperations.OnCancelTimer(string key)
+        void IConnectionOperations.OnCancelTimer(string key)
             => CancelTimer(key);
 
-        ILoggingAdapter ITransportOperations.Log => Log;
+        ILoggingAdapter IConnectionOperations.Log => Log;
     }
 }

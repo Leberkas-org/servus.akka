@@ -5,8 +5,8 @@ using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Tcp.Client;
 
-public sealed class PipeTransportStateMachine(
-    ITransportOperations ops,
+public sealed class TcpConnectionStateMachine(
+    IConnectionOperations ops,
     IActorRef connectionManager,
     IPoolingStrategy poolingStrategy,
     IActorRef self)

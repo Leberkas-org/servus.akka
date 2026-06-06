@@ -2,7 +2,7 @@ using Akka.Event;
 
 namespace Servus.Akka.Transport;
 
-public interface ITransportOperations
+public interface IConnectionOperations
 {
     void OnPushInbound(ITransportInbound item);
     void OnSignalPullOutbound();

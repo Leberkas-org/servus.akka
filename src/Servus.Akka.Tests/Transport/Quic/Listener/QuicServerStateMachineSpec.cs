@@ -29,10 +29,10 @@ public sealed class QuicServerStateMachineSpec
             dispose: () => default);
     }
 
-    private static (QuicServerStateMachine Sm, MockTransportOperations Ops) CreateStateMachine(
+    private static (QuicServerStateMachine Sm, MockConnectionOperations Ops) CreateStateMachine(
         QuicConnectionHandle? handle = null)
     {
-        var ops = new MockTransportOperations();
+        var ops = new MockConnectionOperations();
         var sm = new QuicServerStateMachine(
             ops,
             ActorRefs.Nobody,

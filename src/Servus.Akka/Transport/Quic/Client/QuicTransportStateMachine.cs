@@ -7,7 +7,7 @@ using static Servus.Senf;
 namespace Servus.Akka.Transport.Quic.Client;
 
 public sealed class QuicTransportStateMachine(
-    ITransportOperations ops,
+    IConnectionOperations ops,
     IActorRef connectionManager,
     IActorRef self)
 {

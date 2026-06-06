@@ -8,17 +8,17 @@ using Servus.Akka.Transport.Tcp.Listener;
 
 namespace Servus.Akka.Tests.Transport.Tcp.Listener;
 
-public sealed class PipeServerStateMachineSpec
+public sealed class TcpServerStateMachineSpec
 {
     private static readonly ConnectionInfo TestConnectionInfo = new(
         new IPEndPoint(IPAddress.Loopback, 5000),
         new IPEndPoint(IPAddress.Loopback, 12345),
         TransportProtocol.Tcp);
 
-    private static (PipeServerStateMachine Sm, MockTransportOperations Ops) CreateStateMachine(Stream? stream = null)
+    private static (TcpServerStateMachine Sm, MockConnectionOperations Ops) CreateStateMachine(Stream? stream = null)
     {
-        var ops = new MockTransportOperations();
-        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, stream ?? Stream.Null, TestConnectionInfo);
+        var ops = new MockConnectionOperations();
+        var sm = new TcpServerStateMachine(ops, ActorRefs.Nobody, stream ?? Stream.Null, TestConnectionInfo);
         return (sm, ops);
     }
 
@@ -45,8 +45,8 @@ public sealed class PipeServerStateMachineSpec
     [Fact(Timeout = 5000)]
     public void Start_should_include_tls_info_when_allow_delayed_negotiation()
     {
-        var ops = new MockTransportOperations();
-        var sm = new PipeServerStateMachine(ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
+        var ops = new MockConnectionOperations();
+        var sm = new TcpServerStateMachine(ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
             allowDelayedNegotiation: true);
 
         sm.Start();

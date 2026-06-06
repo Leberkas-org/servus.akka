@@ -3,7 +3,7 @@ using Servus.Akka.Transport;
 
 namespace Servus.Akka.Tests.Utils;
 
-internal sealed class MockTransportOperations : ITransportOperations
+internal sealed class MockConnectionOperations : IConnectionOperations
 {
     public List<ITransportInbound> PushedInbound { get; } = [];
     public int PullOutboundCount { get; set; }

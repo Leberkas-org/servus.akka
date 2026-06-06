@@ -7,7 +7,7 @@ using Servus.Akka.Transport.Tcp.Client;
 
 namespace Servus.Akka.Tests.Transport.Tcp.Client;
 
-public sealed class PipeTransportStateMachineSpec
+public sealed class TcpConnectionStateMachineSpec
 {
     private static readonly TcpTransportOptions TestOptions = new()
     {
@@ -17,10 +17,10 @@ public sealed class PipeTransportStateMachineSpec
 
     private static readonly IPoolingStrategy TestStrategy = new TestPoolingStrategy();
 
-    private static (PipeTransportStateMachine Sm, MockTransportOperations Ops) CreateStateMachine()
+    private static (TcpConnectionStateMachine Sm, MockConnectionOperations Ops) CreateStateMachine()
     {
-        var ops = new MockTransportOperations();
-        var sm = new PipeTransportStateMachine(
+        var ops = new MockConnectionOperations();
+        var sm = new TcpConnectionStateMachine(
             ops,
             ActorRefs.Nobody,
             TestStrategy,
@@ -510,8 +510,8 @@ public sealed class PipeTransportStateMachineSpec
     [Fact(Timeout = 5000)]
     public void Dispatch_InboundComplete_with_auto_reconnect_should_push_transient_disconnect()
     {
-        var ops = new MockTransportOperations();
-        var sm = new PipeTransportStateMachine(
+        var ops = new MockConnectionOperations();
+        var sm = new TcpConnectionStateMachine(
             ops, ActorRefs.Nobody, new ReusablePoolingStrategy(), ActorRefs.Nobody);
         var options = new TcpTransportOptions { Host = "localhost", Port = 8080, AutoReconnect = true };
 

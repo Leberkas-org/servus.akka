@@ -3,7 +3,7 @@ using Servus.Akka.Transport;
 
 namespace Servus.Akka.Tests.Utils;
 
-internal sealed class StubOps : ITransportOperations
+internal sealed class StubOps : IConnectionOperations
 {
     public readonly List<ITransportInbound> PushedInbound = [];
     public int PullCount;

@@ -6,8 +6,8 @@ using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Tcp.Listener;
 
-internal sealed class PipeServerStateMachine(
-    ITransportOperations ops,
+internal sealed class TcpServerStateMachine(
+    IConnectionOperations ops,
     IActorRef self,
     Stream stream,
     ConnectionInfo connectionInfo,

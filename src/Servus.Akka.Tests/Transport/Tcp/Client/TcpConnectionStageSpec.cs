@@ -7,21 +7,21 @@ using Servus.Akka.Transport.Tcp.Client;
 
 namespace Servus.Akka.Tests.Transport.Tcp.Client;
 
-public sealed class PipeTransportStageSpec : TestKit
+public sealed class TcpConnectionStageSpec : TestKit
 {
     private readonly IMaterializer _materializer;
     private readonly IPoolingStrategy _poolingStrategy;
 
-    public PipeTransportStageSpec()
+    public TcpConnectionStageSpec()
     {
         _materializer = Sys.Materializer();
         _poolingStrategy = new TestPoolingStrategy();
     }
 
     [Fact(Timeout = 5000)]
-    public void PipeTransportStage_should_create_without_error()
+    public void TcpConnectionStage_should_create_without_error()
     {
-        var stage = new PipeTransportStage(TestActor, _poolingStrategy);
+        var stage = new TcpConnectionStage(TestActor, _poolingStrategy);
 
         Assert.NotNull(stage);
     }
@@ -29,17 +29,17 @@ public sealed class PipeTransportStageSpec : TestKit
     [Fact(Timeout = 5000)]
     public void Stage_should_have_correct_shape()
     {
-        var stage = new PipeTransportStage(TestActor, _poolingStrategy);
+        var stage = new TcpConnectionStage(TestActor, _poolingStrategy);
 
         Assert.NotNull(stage.Shape);
-        Assert.Equal("PipeTransport.In", stage.Shape.Inlet.Name);
-        Assert.Equal("PipeTransport.Out", stage.Shape.Outlet.Name);
+        Assert.Equal("TcpConnection.In", stage.Shape.Inlet.Name);
+        Assert.Equal("TcpConnection.Out", stage.Shape.Outlet.Name);
     }
 
     [Fact(Timeout = 5000)]
     public void Stage_shape_inlet_should_accept_ITransportOutbound()
     {
-        var stage = new PipeTransportStage(TestActor, _poolingStrategy);
+        var stage = new TcpConnectionStage(TestActor, _poolingStrategy);
 
         Assert.IsAssignableFrom<Inlet<ITransportOutbound>>(stage.Shape.Inlet);
     }
@@ -47,7 +47,7 @@ public sealed class PipeTransportStageSpec : TestKit
     [Fact(Timeout = 5000)]
     public void Stage_shape_outlet_should_emit_ITransportInbound()
     {
-        var stage = new PipeTransportStage(TestActor, _poolingStrategy);
+        var stage = new TcpConnectionStage(TestActor, _poolingStrategy);
 
         Assert.IsAssignableFrom<Outlet<ITransportInbound>>(stage.Shape.Outlet);
     }
@@ -55,7 +55,7 @@ public sealed class PipeTransportStageSpec : TestKit
     [Fact(Timeout = 5000)]
     public void Stage_should_materialize_without_error()
     {
-        var stage = new PipeTransportStage(TestActor, _poolingStrategy);
+        var stage = new TcpConnectionStage(TestActor, _poolingStrategy);
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, sinkQueue) = Source

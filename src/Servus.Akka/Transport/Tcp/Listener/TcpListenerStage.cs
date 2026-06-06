@@ -185,7 +185,7 @@ internal sealed class TcpListenerStage
                 tlsResult.Security is not null ? TransportProtocol.Tls : TransportProtocol.Tcp,
                 tlsResult.Security);
 
-            var connectionStage = new PipeServerConnectionStage(
+            var connectionStage = new TcpServerConnectionStage(
                         tlsResult.Stream,
                         connectionInfo,
                         tlsResult.SslStream,

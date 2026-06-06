@@ -6,7 +6,7 @@ using Akka.Actor;
 namespace Servus.Akka.Transport.Quic.Listener;
 
 internal sealed class QuicServerStateMachine(
-    ITransportOperations ops,
+    IConnectionOperations ops,
     IActorRef self,
     QuicConnectionHandle connectionHandle,
     ConnectionInfo connectionInfo)
