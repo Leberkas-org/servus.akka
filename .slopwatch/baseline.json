@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "createdAt": "2026-06-06T08:59:07.0814814+00:00",
+  "updatedAt": "2026-06-06T08:59:07.0837576+00:00",
+  "description": "Initial baseline created by 'slopwatch init' on 2026-06-06 08:59:07 UTC",
+  "entries": [
+    {
+      "hash": "8a7f9943b03c11b7",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/SocketPipeConnection.cs",
+      "lineNumber": 129,
+      "codeSnippet": "catch (OperationCanceledException)\n        {\n            // noop\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0835935+00:00"
+    },
+    {
+      "hash": "98aaad1d4b582ab7",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/SocketPipeConnection.cs",
+      "lineNumber": 133,
+      "codeSnippet": "catch (SocketException)\n        {\n            // noop\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0836898+00:00"
+    },
+    {
+      "hash": "bada6e45d503621f",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/SocketPipeConnection.cs",
+      "lineNumber": 137,
+      "codeSnippet": "catch (IOException)\n        {\n            // noop\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0836996+00:00"
+    },
+    {
+      "hash": "65611b869774c869",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/SocketPipeConnection.cs",
+      "lineNumber": 141,
+      "codeSnippet": "catch (ObjectDisposedException)\n        {\n            // noop\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837022+00:00"
+    },
+    {
+      "hash": "c298fde039cf2de0",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/Client/TcpClientProvider.cs",
+      "lineNumber": 120,
+      "codeSnippet": "catch (ObjectDisposedException)\r\n        {\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837414+00:00"
+    },
+    {
+      "hash": "0ea1d12cdaad9cbc",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka/Transport/Tcp/Client/TlsClientProvider.cs",
+      "lineNumber": 147,
+      "codeSnippet": "catch (ObjectDisposedException)\r\n            {\r\n            }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837444+00:00"
+    },
+    {
+      "hash": "335f42bb3e3f7ae7",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka.TestKit/TestConnectionStage.cs",
+      "lineNumber": 191,
+      "codeSnippet": "catch (ChannelClosedException)\r\n                {\r\n                }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837464+00:00"
+    },
+    {
+      "hash": "9024998d20ab9361",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka.TestKit.Tests/TestConnectionStageBuilderExtensionsSpec.cs",
+      "lineNumber": 228,
+      "codeSnippet": "catch (OperationCanceledException)\r\n        {\r\n            // Expected: timeout after waiting for a second message that won't arrive\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837489+00:00"
+    },
+    {
+      "hash": "0875aaa499dc0948",
+      "ruleId": "SW004",
+      "filePath": "src/Servus.Akka.Tests/Local/LocalEntityRegionTests.cs",
+      "lineNumber": 108,
+      "codeSnippet": "Task.Delay(TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken)",
+      "message": "Test uses Task.Delay(TimeSpan.FromSeconds(3)) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-06-06T08:59:07.0837532+00:00"
+    },
+    {
+      "hash": "757b058ed9d97dce",
+      "ruleId": "SW004",
+      "filePath": "src/Servus.Akka.Tests/Local/LocalEntityRegionTests.cs",
+      "lineNumber": 218,
+      "codeSnippet": "Task.Delay(TimeSpan.FromSeconds(2), TestContext.Current.CancellationToken)",
+      "message": "Test uses Task.Delay(TimeSpan.FromSeconds(2)) which may indicate a timing-dependent test",
+      "baselinedAt": "2026-06-06T08:59:07.0837552+00:00"
+    },
+    {
+      "hash": "ba317cfc8702d0d0",
+      "ruleId": "SW003",
+      "filePath": "src/Servus.Akka.Tests/Transport/Quic/Client/QuicConnectionFactorySpec.cs",
+      "lineNumber": 63,
+      "codeSnippet": "catch\r\n        {\r\n            // Server connection acceptance may fail if client closes first\r\n        }",
+      "message": "Empty catch block swallows exceptions without handling",
+      "baselinedAt": "2026-06-06T08:59:07.0837575+00:00"
+    }
+  ]
+}

@@ -129,4 +129,44 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         var bytesReceived = await _server.ReceiveAsync(buffer, SocketFlags.None);
         Assert.Equal("stream reply", System.Text.Encoding.UTF8.GetString(buffer, 0, bytesReceived));
     }
+
+    [Fact(Timeout = 5000)]
+    public async Task CompleteAndDrainOutputAsync_should_send_all_buffered_data_before_completing()
+    {
+        var memStream = new MemoryStream();
+        var connection = SocketPipeConnection.Create(memStream);
+
+        var writer = connection.OutputWriter;
+        var mem = writer.GetMemory(4);
+        mem.Span[0] = 0xAA;
+        mem.Span[1] = 0xBB;
+        mem.Span[2] = 0xCC;
+        mem.Span[3] = 0xDD;
+        writer.Advance(4);
+        await writer.FlushAsync();
+
+        await connection.CompleteAndDrainOutputAsync();
+
+        memStream.Position = 0;
+        var data = new byte[4];
+        var read = await memStream.ReadAsync(data);
+        Assert.Equal(4, read);
+        Assert.Equal(0xAA, data[0]);
+        Assert.Equal(0xDD, data[3]);
+
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task CompleteAndDrainOutputAsync_with_no_data_should_complete_without_error()
+    {
+        var memStream = new MemoryStream();
+        var connection = SocketPipeConnection.Create(memStream);
+
+        await connection.CompleteAndDrainOutputAsync();
+
+        Assert.Equal(0, memStream.Length);
+
+        await connection.DisposeAsync();
+    }
 }

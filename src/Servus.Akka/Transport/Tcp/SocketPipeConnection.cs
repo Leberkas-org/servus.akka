@@ -16,6 +16,12 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     public PipeReader InputReader => _inputPipe.Reader;
     public PipeWriter OutputWriter => _outputPipe.Writer;
 
+    public async Task CompleteAndDrainOutputAsync()
+    {
+        await _outputPipe.Writer.CompleteAsync();
+        await _sendLoop;
+    }
+
     private SocketPipeConnection(
         Pipe inputPipe,
         Pipe outputPipe,
@@ -53,8 +59,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunSocketReceiveLoop(socket, inputPipe.Writer, opts, ct));
-        var sendLoop = Task.Run(() => RunSocketSendLoop(socket, outputPipe.Reader, ct));
+        var receiveLoop = Task.Run(() => RunSocketReceiveLoop(socket, inputPipe.Writer, opts, ct), ct);
+        var sendLoop = Task.Run(() => RunSocketSendLoop(socket, outputPipe.Reader, ct), ct);
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts, socket);
     }
@@ -80,8 +86,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
-        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
+        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct), ct);
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct), ct);
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }
@@ -122,15 +128,19 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // noop
         }
         catch (SocketException)
         {
+            // noop
         }
         catch (IOException)
         {
+            // noop
         }
         catch (ObjectDisposedException)
         {
+            // noop
         }
         finally
         {
@@ -167,15 +177,19 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // noop
         }
         catch (SocketException)
         {
+            // noop
         }
         catch (IOException)
         {
+            // noop
         }
         catch (ObjectDisposedException)
         {
+            // noop
         }
         finally
         {
@@ -217,15 +231,19 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // noop
         }
         catch (SocketException)
         {
+            // noop
         }
         catch (IOException)
         {
+            // noop
         }
         catch (ObjectDisposedException)
         {
+            // noop
         }
         finally
         {
@@ -266,15 +284,19 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (OperationCanceledException)
         {
+            // noop
         }
         catch (SocketException)
         {
+            // noop
         }
         catch (IOException)
         {
+            // noop
         }
         catch (ObjectDisposedException)
         {
+            // noop
         }
         finally
         {
@@ -296,9 +318,11 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
             }
             catch (SocketException)
             {
+                // noop
             }
             catch (ObjectDisposedException)
             {
+                // noop
             }
 
             _socket.Close();
