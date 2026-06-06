@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using System.Net;
 using Servus.Akka.Transport.Quic.Client;
 
@@ -12,7 +11,7 @@ internal readonly record struct StreamLeaseAcquired(Stream Stream, long StreamId
 
 internal readonly record struct AcquisitionFailed(Exception Error) : IQuicTransportEvent;
 
-internal readonly record struct PipeStreamReadComplete(ReadResult Result, long StreamId, int Gen) : IQuicTransportEvent;
+internal readonly record struct PipeStreamReadComplete(TransportBuffer? Buffer, long StreamId, int Gen, bool IsCompleted) : IQuicTransportEvent;
 
 internal readonly record struct PipeStreamReadFailed(Exception Error, long StreamId, int Gen) : IQuicTransportEvent;
 

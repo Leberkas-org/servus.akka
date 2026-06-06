@@ -30,7 +30,7 @@ public sealed class TcpConnectionStateMachineSpec
 
     private static ConnectionLease CreateTestLease()
     {
-        var connection = SocketPipeConnection.Create(Stream.Null);
+        var connection = SocketPipeConnection.CreateInert();
         var cts = new CancellationTokenSource();
         return new ConnectionLease(connection, cts, ConnectionInfo.None);
     }

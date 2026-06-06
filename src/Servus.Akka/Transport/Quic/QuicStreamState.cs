@@ -17,13 +17,18 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
     private SocketPipeConnection? _connection;
     private Stream? _stream;
     private Queue<TransportBuffer>? _openingBuffer = new();
-    private SequencePosition? _pendingAdvance;
+    private Task? _drainTask;
 
     public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
     public StreamDirection Direction { get; } = direction;
     public int PendingWriteCount => _openingBuffer?.Count ?? 0;
     public bool IsCompleteWritesDeferred { get; private set; }
     public PipeReader? InputReader => _connection?.InputReader;
+
+    internal void ActivateWithoutConnection()
+    {
+        Phase = StreamPhase.Active;
+    }
 
     public void AttachConnection(Stream stream)
     {
@@ -101,20 +106,6 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
         Phase = StreamPhase.Closed;
     }
 
-    public void SetPendingAdvance(SequencePosition position)
-    {
-        _pendingAdvance = position;
-    }
-
-    public void AdvancePendingRead()
-    {
-        if (_pendingAdvance is { } pos && _connection is not null)
-        {
-            _pendingAdvance = null;
-            _connection.InputReader.AdvanceTo(pos);
-        }
-    }
-
     public Task CompleteAndDrainOutputAsync()
     {
         return _connection?.CompleteAndDrainOutputAsync() ?? Task.CompletedTask;
@@ -137,7 +128,7 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
             return;
         }
 
-        _ = _connection.CompleteAndDrainOutputAsync().ContinueWith(_ =>
+        _drainTask = _connection.CompleteAndDrainOutputAsync().ContinueWith(_ =>
         {
             if (_stream is QuicStream qs)
             {
@@ -161,8 +152,22 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
 
     public async ValueTask DisposeAsync()
     {
-        _pendingAdvance = null;
         DisposePendingWrites();
+
+        if (_drainTask is not null)
+        {
+            try
+            {
+                await _drainTask.ConfigureAwait(false);
+            }
+            catch
+            {
+                // best-effort: drain may fail if connection was already reset
+            }
+
+            _drainTask = null;
+        }
+
         if (_connection is not null)
         {
             await _connection.DisposeAsync().ConfigureAwait(false);

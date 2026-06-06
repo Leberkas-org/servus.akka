@@ -267,6 +267,14 @@ public sealed class QuicTransportStateMachine(
         ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
     }
 
+    internal void RegisterTestStream(long streamId, StreamDirection direction)
+    {
+        var target = StreamTarget.FromId(streamId);
+        var state = new QuicStreamState(direction);
+        state.ActivateWithoutConnection();
+        _streams[target] = state;
+    }
+
     private void RequestStreamRead(StreamTarget streamId, int gen)
     {
         if (!_streams.TryGetValue(streamId, out var state) || state.InputReader is null)
@@ -274,10 +282,22 @@ public sealed class QuicTransportStateMachine(
             return;
         }
 
-        state.AdvancePendingRead();
+        var reader = state.InputReader;
+        reader.ReadAsync().AsTask().PipeTo(self,
+            success: result =>
+            {
+                TransportBuffer? buf = null;
+                if (result.Buffer.Length > 0)
+                {
+                    var length = (int)result.Buffer.Length;
+                    buf = TransportBuffer.Rent(length);
+                    result.Buffer.CopyTo(buf.FullMemory.Span);
+                    buf.Length = length;
+                }
 
-        state.InputReader.ReadAsync().AsTask().PipeTo(self,
-            success: result => new PipeStreamReadComplete(result, streamId.Value, gen),
+                reader.AdvanceTo(result.Buffer.End);
+                return new PipeStreamReadComplete(buf, streamId.Value, gen, result.IsCompleted || result.IsCanceled);
+            },
             failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));
     }
 
@@ -286,21 +306,16 @@ public sealed class QuicTransportStateMachine(
         var streamId = StreamTarget.FromId(evt.StreamId);
         if (!_streams.TryGetValue(streamId, out var state))
         {
+            evt.Buffer?.Dispose();
             return;
         }
 
-        var result = evt.Result;
-        if (result.Buffer.Length > 0)
+        if (evt.Buffer is not null)
         {
-            var length = (int)result.Buffer.Length;
-            var buf = TransportBuffer.Rent(length);
-            result.Buffer.CopyTo(buf.FullMemory.Span);
-            buf.Length = length;
-            state.SetPendingAdvance(result.Buffer.End);
-            ops.OnPushInbound(new MultiplexedData(buf, streamId));
+            ops.OnPushInbound(new MultiplexedData(evt.Buffer, streamId));
         }
 
-        if (result.IsCompleted || result.IsCanceled)
+        if (evt.IsCompleted)
         {
             OnInboundComplete(DisconnectReason.Graceful, evt.StreamId);
             return;

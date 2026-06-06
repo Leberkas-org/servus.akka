@@ -1,5 +1,5 @@
-using System.IO.Pipelines;
 using System.Net;
+using Servus.Akka.Transport;
 using Servus.Akka.Transport.Quic;
 using Servus.Akka.Transport.Quic.Client;
 using QuicInboundStreamAccepted = Servus.Akka.Transport.Quic.InboundStreamAccepted;
@@ -48,27 +48,29 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void PipeStreamReadComplete_should_carry_ReadResult_StreamId_Gen()
+    public void PipeStreamReadComplete_should_carry_Buffer_StreamId_Gen()
     {
-        var pipe = new Pipe();
-        var mem = pipe.Writer.GetMemory(1);
-        mem.Span[0] = 0xAB;
-        pipe.Writer.Advance(1);
-        pipe.Writer.FlushAsync().AsTask().Wait();
-        var result = pipe.Reader.ReadAsync().AsTask().Result;
+        var buf = TransportBuffer.Rent(4);
+        new byte[] { 1, 2, 3, 4 }.CopyTo(buf.FullMemory.Span);
+        buf.Length = 4;
 
-        const long streamId = 123L;
-        const int gen = 5;
+        var evt = new PipeStreamReadComplete(buf, 42, 1, false);
 
-        var evt = new PipeStreamReadComplete(result, streamId, gen);
+        Assert.Equal(4, evt.Buffer!.Length);
+        Assert.Equal(42, evt.StreamId);
+        Assert.Equal(1, evt.Gen);
+        Assert.False(evt.IsCompleted);
 
-        Assert.Equal(streamId, evt.StreamId);
-        Assert.Equal(gen, evt.Gen);
-        Assert.True(evt.Result.Buffer.Length > 0);
+        buf.Dispose();
+    }
 
-        pipe.Reader.AdvanceTo(result.Buffer.End);
-        pipe.Reader.CompleteAsync().AsTask().Wait();
-        pipe.Writer.CompleteAsync().AsTask().Wait();
+    [Fact(Timeout = 5000)]
+    public void PipeStreamReadComplete_completed_should_have_null_buffer()
+    {
+        var evt = new PipeStreamReadComplete(null, 42, 1, true);
+
+        Assert.Null(evt.Buffer);
+        Assert.True(evt.IsCompleted);
     }
 
     [Fact(Timeout = 5000)]

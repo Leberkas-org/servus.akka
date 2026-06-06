@@ -17,6 +17,14 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     public PipeReader InputReader => _inputPipe.Reader;
     public PipeWriter OutputWriter => _outputPipe.Writer;
 
+    internal static SocketPipeConnection CreateInert()
+    {
+        var inputPipe = new Pipe();
+        var outputPipe = new Pipe();
+        var cts = new CancellationTokenSource();
+        return new SocketPipeConnection(inputPipe, outputPipe, Task.CompletedTask, Task.CompletedTask, cts);
+    }
+
     public async Task CompleteAndDrainOutputAsync()
     {
         await _outputPipe.Writer.CompleteAsync();

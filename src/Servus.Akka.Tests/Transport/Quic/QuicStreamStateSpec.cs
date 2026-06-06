@@ -296,13 +296,4 @@ public sealed class QuicStreamStateSpec
         Assert.Equal(StreamPhase.HalfClosedRead, state.Phase);
     }
 
-    [Fact(Timeout = 5000)]
-    public void AdvancePendingRead_with_no_pending_should_be_noop()
-    {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
-        state.AttachConnection(new MemoryStream());
-
-        // Should not throw
-        state.AdvancePendingRead();
-    }
 }

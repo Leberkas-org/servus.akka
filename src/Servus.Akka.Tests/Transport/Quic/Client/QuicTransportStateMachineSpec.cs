@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
@@ -46,21 +45,15 @@ public sealed class QuicTransportStateMachineSpec
 
     private static PipeStreamReadComplete CreateReadEvent(byte[] data, long streamId, int gen)
     {
-        var pipe = new Pipe();
-        var mem = pipe.Writer.GetMemory(data.Length);
-        data.CopyTo(mem);
-        pipe.Writer.Advance(data.Length);
-        pipe.Writer.FlushAsync().AsTask().Wait();
-        var result = pipe.Reader.ReadAsync().AsTask().Result;
-        return new PipeStreamReadComplete(result, streamId, gen);
+        var buf = TransportBuffer.Rent(data.Length);
+        data.CopyTo(buf.FullMemory.Span);
+        buf.Length = data.Length;
+        return new PipeStreamReadComplete(buf, streamId, gen, false);
     }
 
     private static PipeStreamReadComplete CreateCompletedReadEvent(long streamId, int gen)
     {
-        var pipe = new Pipe();
-        pipe.Writer.CompleteAsync().AsTask().Wait();
-        var result = pipe.Reader.ReadAsync().AsTask().Result;
-        return new PipeStreamReadComplete(result, streamId, gen);
+        return new PipeStreamReadComplete(null, streamId, gen, true);
     }
 
     [Fact(Timeout = 5000)]
@@ -367,8 +360,7 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         const long streamId = 123L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
@@ -429,8 +421,7 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 789L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
@@ -448,8 +439,7 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 999L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
@@ -548,8 +538,7 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 333L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         sm.HandlePush(new CompleteWrites(streamId));
 
@@ -579,8 +568,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
 
         var streamId = 111L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
@@ -684,8 +672,7 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         StreamTarget streamId = 888L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 

@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
@@ -121,18 +120,14 @@ public sealed class QuicConnectionMigrationSpec
         sm.Dispatch(new ConnectionLeaseAcquired(lease));
 
         const long streamId = 0L;
-        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        var mem = pipe.Writer.GetMemory(4);
-        new byte[] { 1, 2, 3, 4 }.CopyTo(mem);
-        pipe.Writer.Advance(4);
-        pipe.Writer.FlushAsync().AsTask().Wait();
-        var readResult = pipe.Reader.ReadAsync().AsTask().Result;
-        sm.Dispatch(new PipeStreamReadComplete(readResult, streamId, 2));
+        var buf = TransportBuffer.Rent(4);
+        new byte[] { 1, 2, 3, 4 }.CopyTo(buf.FullMemory.Span);
+        buf.Length = 4;
+        sm.Dispatch(new PipeStreamReadComplete(buf, streamId, 2, false));
 
         Assert.DoesNotContain(ops.PushedInbound, i => i is ConnectionMigrationDetected);
 

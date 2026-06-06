@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
@@ -51,21 +50,15 @@ public sealed class QuicServerStateMachineSpec
 
     private static PipeStreamReadComplete CreateReadEvent(byte[] data, long streamId, int gen)
     {
-        var pipe = new Pipe();
-        var mem = pipe.Writer.GetMemory(data.Length);
-        data.CopyTo(mem);
-        pipe.Writer.Advance(data.Length);
-        pipe.Writer.FlushAsync().AsTask().Wait();
-        var result = pipe.Reader.ReadAsync().AsTask().Result;
-        return new PipeStreamReadComplete(result, streamId, gen);
+        var buf = TransportBuffer.Rent(data.Length);
+        data.CopyTo(buf.FullMemory.Span);
+        buf.Length = data.Length;
+        return new PipeStreamReadComplete(buf, streamId, gen, false);
     }
 
     private static PipeStreamReadComplete CreateCompletedReadEvent(long streamId, int gen)
     {
-        var pipe = new Pipe();
-        pipe.Writer.CompleteAsync().AsTask().Wait();
-        var result = pipe.Reader.ReadAsync().AsTask().Result;
-        return new PipeStreamReadComplete(result, streamId, gen);
+        return new PipeStreamReadComplete(null, streamId, gen, true);
     }
 
     [Fact(Timeout = 5000)]
@@ -134,8 +127,7 @@ public sealed class QuicServerStateMachineSpec
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.HandlePush(new OpenStream(42, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 42));
+        sm.RegisterTestStream(42, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
         var evt = CreateReadEvent([1, 2, 3], 42, 1);
@@ -152,8 +144,7 @@ public sealed class QuicServerStateMachineSpec
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.HandlePush(new OpenStream(42, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 42));
+        sm.RegisterTestStream(42, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
         var evt = CreateReadEvent([1, 2, 3], 42, 999);
@@ -234,8 +225,7 @@ public sealed class QuicServerStateMachineSpec
         sm.Start();
         ops.PushedInbound.Clear();
 
-        sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 1));
+        sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
         var evt = CreateCompletedReadEvent(1, 1);
@@ -278,8 +268,7 @@ public sealed class QuicServerStateMachineSpec
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 1));
+        sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
         sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), 1, 1));

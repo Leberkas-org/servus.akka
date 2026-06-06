@@ -78,7 +78,12 @@ internal sealed class QuicListenerStage
 
             if (_listener is not null)
             {
-                _ = _listener.DisposeAsync();
+                var disposeTask = _listener.DisposeAsync();
+                if (!disposeTask.IsCompleted)
+                {
+                    disposeTask.AsTask().Wait(TimeSpan.FromSeconds(10));
+                }
+
                 _listener = null;
             }
 
