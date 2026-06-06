@@ -1,7 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Net.Security;
 using Akka.Actor;
-using Akka.Event;
 using Akka.Streams;
 using Akka.Streams.Stage;
 
@@ -124,7 +123,5 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
         void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay) => ScheduleOnce(key, delay);
 
         void IConnectionOperations.OnCancelTimer(string key) => CancelTimer(key);
-
-        ILoggingAdapter IConnectionOperations.Log => Log;
     }
 }

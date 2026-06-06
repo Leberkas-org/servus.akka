@@ -1,7 +1,6 @@
-using System.IO.Pipelines;
 using System.Net;
 using System.Net.Sockets;
-using Servus.Akka.Transport.Tcp;
+using Servus.Akka.Transport;
 
 namespace Servus.Akka.Tests.Transport.Tcp;
 
@@ -25,9 +24,9 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        _server?.Dispose();
-        _client?.Dispose();
-        _listener?.Dispose();
+        _server.Dispose();
+        _client.Dispose();
+        _listener.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -36,7 +35,7 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
     {
         await using var connection = SocketPipeConnection.Create(_client);
 
-        var sent = System.Text.Encoding.UTF8.GetBytes("hello from server");
+        var sent = "hello from server"u8.ToArray();
         await _server.SendAsync(sent, SocketFlags.None);
 
         var result = await connection.InputReader.ReadAsync();
@@ -51,7 +50,7 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
     {
         await using var connection = SocketPipeConnection.Create(_client);
 
-        var data = System.Text.Encoding.UTF8.GetBytes("hello from client");
+        var data = "hello from client"u8.ToArray();
         await connection.OutputWriter.WriteAsync(data);
 
         var buffer = new byte[1024];
@@ -112,7 +111,7 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         var stream = new NetworkStream(_client, ownsSocket: false);
         await using var connection = SocketPipeConnection.Create(stream);
 
-        var sent = System.Text.Encoding.UTF8.GetBytes("stream data");
+        var sent = "stream data"u8.ToArray();
         await _server.SendAsync(sent, SocketFlags.None);
 
         var result = await connection.InputReader.ReadAsync();
@@ -122,7 +121,7 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         Assert.Equal("stream data", received);
 
         // Verify output direction works too
-        var outData = System.Text.Encoding.UTF8.GetBytes("stream reply");
+        var outData = "stream reply"u8.ToArray();
         await connection.OutputWriter.WriteAsync(outData);
 
         var buffer = new byte[1024];

@@ -10,7 +10,6 @@ public sealed class TcpTransportFactory(
 {
     public Flow<ITransportOutbound, ITransportInbound, NotUsed> Create()
     {
-        var stage = new TcpConnectionStage(connectionManager, poolingStrategy);
-        return Flow.FromGraph(stage);
+        return Flow.FromGraph(new TcpConnectionStage(connectionManager, poolingStrategy));
     }
 }

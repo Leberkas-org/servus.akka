@@ -24,12 +24,11 @@ internal sealed class QuicConnectionHandle : IAsyncDisposable
         _dispose = dispose;
     }
 
-    public Task<(Stream Stream, long StreamId)> OpenStreamAsync(
-        StreamDirection direction, CancellationToken ct = default)
+    public Task<(Stream Stream, long StreamId)> OpenStreamAsync(StreamDirection direction,
+        CancellationToken ct = default)
         => _openStream(direction, ct);
 
-    public Task<(Stream Stream, long StreamId)?> AcceptInboundStreamAsync(
-        CancellationToken ct = default)
+    public Task<(Stream Stream, long StreamId)?> AcceptInboundStreamAsync(CancellationToken ct = default)
         => _acceptInboundStream(ct);
 
     public EndPoint? LocalEndPoint() => _getLocalEndPoint();

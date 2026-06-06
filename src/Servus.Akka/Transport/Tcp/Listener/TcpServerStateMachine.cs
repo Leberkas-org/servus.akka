@@ -15,7 +15,6 @@ internal sealed class TcpServerStateMachine(
     bool allowDelayedNegotiation = false)
 {
     private SocketPipeConnection? _connection;
-    private readonly LeaseTracker _leaseTracker = new(8);
     private SequencePosition? _pendingAdvance;
     private int _connectionGen;
     private bool _upstreamFinished;
@@ -174,7 +173,6 @@ internal sealed class TcpServerStateMachine(
     private void Cleanup()
     {
         _connectionGen++;
-        _leaseTracker.ForceReturnAll();
         DisposeConnection();
         _connection = null;
         stream.Dispose();

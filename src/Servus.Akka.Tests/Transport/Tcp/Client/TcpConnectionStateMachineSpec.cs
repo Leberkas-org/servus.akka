@@ -31,9 +31,8 @@ public sealed class TcpConnectionStateMachineSpec
     private static ConnectionLease CreateTestLease()
     {
         var connection = SocketPipeConnection.Create(Stream.Null);
-        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        return new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
+        return new ConnectionLease(connection, cts, ConnectionInfo.None);
     }
 
     private static TransportBuffer CreateTestBuffer(params byte[] data)

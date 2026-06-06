@@ -10,9 +10,8 @@ public sealed class TcpTransportEventSpec
     public void LeaseAcquired_should_preserve_lease()
     {
         var connection = SocketPipeConnection.Create(Stream.Null);
-        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var lease = new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
+        var lease = new ConnectionLease(connection, cts, ConnectionInfo.None);
 
         var evt = new LeaseAcquired(lease);
 

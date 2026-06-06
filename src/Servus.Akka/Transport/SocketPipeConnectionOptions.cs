@@ -1,4 +1,4 @@
-namespace Servus.Akka.Transport.Tcp;
+namespace Servus.Akka.Transport;
 
 internal sealed class SocketPipeConnectionOptions
 {

@@ -11,13 +11,11 @@ internal sealed class ConnectionLease : IDisposable
 
     internal ConnectionLease(
         SocketPipeConnection connection,
-        LeaseTracker leaseTracker,
         CancellationTokenSource cts,
         ConnectionInfo info,
         TimeProvider? timeProvider = null)
     {
         Connection = connection;
-        LeaseTracker = leaseTracker;
         _cts = cts;
         Info = info;
         _clock = timeProvider ?? TimeProvider.System;
@@ -25,13 +23,10 @@ internal sealed class ConnectionLease : IDisposable
     }
 
     public SocketPipeConnection Connection { get; }
-    public LeaseTracker LeaseTracker { get; }
     public ConnectionInfo Info { get; }
 
     public PipeReader InputReader => Connection.InputReader;
     public PipeWriter OutputWriter => Connection.OutputWriter;
-
-    public bool CanReturn => LeaseTracker.Outstanding == 0;
 
     public bool IsAlive() => _alive;
 
@@ -57,7 +52,6 @@ internal sealed class ConnectionLease : IDisposable
         _alive = false;
         _cts.Cancel();
         _cts.Dispose();
-        LeaseTracker.ForceReturnAll();
         _ = Connection.DisposeAsync().AsTask();
     }
 }

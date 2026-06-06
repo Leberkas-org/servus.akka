@@ -8,9 +8,8 @@ public sealed class ConnectionLeaseSpec
     private static ConnectionLease CreateLease()
     {
         var connection = SocketPipeConnection.Create(Stream.Null);
-        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        var lease = new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
+        var lease = new ConnectionLease(connection, cts, ConnectionInfo.None);
         return lease;
     }
 
@@ -20,14 +19,6 @@ public sealed class ConnectionLeaseSpec
         var lease = CreateLease();
 
         Assert.NotNull(lease.Connection);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void ConnectionLease_should_expose_lease_tracker()
-    {
-        var lease = CreateLease();
-
-        Assert.NotNull(lease.LeaseTracker);
     }
 
     [Fact(Timeout = 5000)]
@@ -71,14 +62,6 @@ public sealed class ConnectionLeaseSpec
 
         lease.Dispose();
         lease.Dispose();
-    }
-
-    [Fact(Timeout = 5000)]
-    public void CanReturn_should_be_true_when_no_segments_outstanding()
-    {
-        var lease = CreateLease();
-
-        Assert.True(lease.CanReturn);
     }
 
     [Fact(Timeout = 5000)]

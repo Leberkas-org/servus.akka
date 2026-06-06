@@ -1,6 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 using Akka.Actor;
-using Akka.Event;
 using Akka.Streams;
 using Akka.Streams.Stage;
 
@@ -101,15 +100,10 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
             }
         }
 
-        void IConnectionOperations.OnCompleteStage()
-            => CompleteStage();
+        void IConnectionOperations.OnCompleteStage() => CompleteStage();
 
-        void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay)
-            => ScheduleOnce(key, delay);
+        void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay) => ScheduleOnce(key, delay);
 
-        void IConnectionOperations.OnCancelTimer(string key)
-            => CancelTimer(key);
-
-        ILoggingAdapter IConnectionOperations.Log => Log;
+        void IConnectionOperations.OnCancelTimer(string key) => CancelTimer(key);
     }
 }

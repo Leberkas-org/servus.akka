@@ -18,8 +18,7 @@ internal sealed class FailOnceTcpConnectionFactory : ITcpConnectionFactory
         }
 
         var connection = SocketPipeConnection.Create(Stream.Null);
-        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        return Task.FromResult(new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None));
+        return Task.FromResult(new ConnectionLease(connection, cts, ConnectionInfo.None));
     }
 }

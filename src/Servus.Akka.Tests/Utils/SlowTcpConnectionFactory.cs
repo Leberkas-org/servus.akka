@@ -13,9 +13,8 @@ internal sealed class SlowTcpConnectionFactory(TimeSpan delay) : ITcpConnectionF
         await Task.Delay(delay, CancellationToken.None).ConfigureAwait(false);
 
         var connection = SocketPipeConnection.Create(Stream.Null);
-        var leaseTracker = new LeaseTracker(16);
         var cts = new CancellationTokenSource();
-        return new ConnectionLease(connection, leaseTracker, cts, ConnectionInfo.None);
+        return new ConnectionLease(connection, cts, ConnectionInfo.None);
     }
 }
 

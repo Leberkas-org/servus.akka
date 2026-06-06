@@ -1,8 +1,9 @@
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Sockets;
+using Servus.Akka.Transport.Tcp;
 
-namespace Servus.Akka.Transport.Tcp;
+namespace Servus.Akka.Transport;
 
 internal sealed class SocketPipeConnection : IAsyncDisposable
 {

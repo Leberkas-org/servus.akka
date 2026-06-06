@@ -113,7 +113,5 @@ internal sealed class TcpConnectionStage : GraphStage<FlowShape<ITransportOutbou
         void IConnectionOperations.OnScheduleTimer(string key, TimeSpan delay) => ScheduleOnce(key, delay);
 
         void IConnectionOperations.OnCancelTimer(string key) => CancelTimer(key);
-
-        ILoggingAdapter IConnectionOperations.Log => Log;
     }
 }

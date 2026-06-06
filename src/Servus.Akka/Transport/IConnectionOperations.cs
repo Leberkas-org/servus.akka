@@ -1,5 +1,3 @@
-using Akka.Event;
-
 namespace Servus.Akka.Transport;
 
 public interface IConnectionOperations
@@ -9,5 +7,4 @@ public interface IConnectionOperations
     void OnCompleteStage();
     void OnScheduleTimer(string key, TimeSpan delay);
     void OnCancelTimer(string key);
-    ILoggingAdapter Log { get; }
 }
