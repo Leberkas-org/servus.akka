@@ -1,3 +1,4 @@
+using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
@@ -96,7 +97,7 @@ public sealed class QuicConnectionMigrationSpec
 
     [Fact(Timeout = 5000)]
     [Trait("RFC", "RFC9000-9")]
-    public void InboundData_should_not_trigger_migration_check()
+    public void PipeStreamReadComplete_should_not_trigger_migration_check()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
@@ -119,11 +120,19 @@ public sealed class QuicConnectionMigrationSpec
         sm.HandlePush(new ConnectTransport(new QuicTransportOptions { Host = "example.com", Port = 443 }));
         sm.Dispatch(new ConnectionLeaseAcquired(lease));
 
+        const long streamId = 0L;
+        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
+        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), streamId));
+
         ops.PushedInbound.Clear();
 
-        var buf = TransportBuffer.Rent(4);
-        buf.Length = 4;
-        sm.Dispatch(new InboundData(buf, 0, 2));
+        var pipe = new Pipe();
+        var mem = pipe.Writer.GetMemory(4);
+        new byte[] { 1, 2, 3, 4 }.CopyTo(mem);
+        pipe.Writer.Advance(4);
+        pipe.Writer.FlushAsync().AsTask().Wait();
+        var readResult = pipe.Reader.ReadAsync().AsTask().Result;
+        sm.Dispatch(new PipeStreamReadComplete(readResult, streamId, 2));
 
         Assert.DoesNotContain(ops.PushedInbound, i => i is ConnectionMigrationDetected);
 

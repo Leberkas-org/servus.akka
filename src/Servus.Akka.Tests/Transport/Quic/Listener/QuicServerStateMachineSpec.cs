@@ -1,3 +1,4 @@
+using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
@@ -46,6 +47,25 @@ public sealed class QuicServerStateMachineSpec
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
         return buf;
+    }
+
+    private static PipeStreamReadComplete CreateReadEvent(byte[] data, long streamId, int gen)
+    {
+        var pipe = new Pipe();
+        var mem = pipe.Writer.GetMemory(data.Length);
+        data.CopyTo(mem);
+        pipe.Writer.Advance(data.Length);
+        pipe.Writer.FlushAsync().AsTask().Wait();
+        var result = pipe.Reader.ReadAsync().AsTask().Result;
+        return new PipeStreamReadComplete(result, streamId, gen);
+    }
+
+    private static PipeStreamReadComplete CreateCompletedReadEvent(long streamId, int gen)
+    {
+        var pipe = new Pipe();
+        pipe.Writer.CompleteAsync().AsTask().Wait();
+        var result = pipe.Reader.ReadAsync().AsTask().Result;
+        return new PipeStreamReadComplete(result, streamId, gen);
     }
 
     [Fact(Timeout = 5000)]
@@ -109,14 +129,17 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_InboundData_should_push_multiplexed_data()
+    public void Dispatch_PipeStreamReadComplete_should_push_multiplexed_data()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
+
+        sm.HandlePush(new OpenStream(42, StreamDirection.Bidirectional));
+        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 42));
         ops.PushedInbound.Clear();
 
-        var buffer = CreateTestBuffer(1, 2, 3);
-        sm.Dispatch(new InboundData(buffer, 42, 1));
+        var evt = CreateReadEvent([1, 2, 3], 42, 1);
+        sm.Dispatch(evt);
 
         Assert.Single(ops.PushedInbound);
         var multiplexed = Assert.IsType<MultiplexedData>(ops.PushedInbound[0]);
@@ -124,28 +147,19 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_InboundData_with_stale_gen_should_dispose_buffer()
+    public void Dispatch_PipeStreamReadComplete_with_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
+
+        sm.HandlePush(new OpenStream(42, StreamDirection.Bidirectional));
+        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 42));
         ops.PushedInbound.Clear();
 
-        var buffer = CreateTestBuffer(1, 2, 3);
-        sm.Dispatch(new InboundData(buffer, 42, 999));
+        var evt = CreateReadEvent([1, 2, 3], 42, 999);
+        sm.Dispatch(evt);
 
         Assert.Empty(ops.PushedInbound);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void Dispatch_OutboundWriteFailed_should_push_error_disconnected()
-    {
-        var (sm, ops) = CreateStateMachine();
-        sm.Start();
-        ops.PushedInbound.Clear();
-
-        sm.Dispatch(new OutboundWriteFailed(new IOException("test"), 0));
-
-        Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Error });
     }
 
     [Fact(Timeout = 5000)]
@@ -204,8 +218,7 @@ public sealed class QuicServerStateMachineSpec
         sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
         ops.PullOutboundCount = 0;
 
-        var stream = Stream.Null;
-        sm.Dispatch(new StreamLeaseAcquired(new StreamHandle(stream), 1));
+        sm.Dispatch(new StreamLeaseAcquired(Stream.Null, 1));
         ops.PullOutboundCount = 0;
 
         var buffer = CreateTestBuffer(1, 2, 3);
@@ -215,35 +228,20 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_InboundComplete_graceful_should_push_StreamReadCompleted()
+    public void Dispatch_PipeStreamReadComplete_completed_should_push_StreamReadCompleted()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
         sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
-
-        var stream = Stream.Null;
-        sm.Dispatch(new StreamLeaseAcquired(new StreamHandle(stream), 1));
+        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 1));
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new InboundComplete(DisconnectReason.Graceful, 1, 1));
+        var evt = CreateCompletedReadEvent(1, 1);
+        sm.Dispatch(evt);
 
         Assert.Contains(ops.PushedInbound, item => item is StreamReadCompleted { Id.Value: 1 });
-    }
-
-    [Fact(Timeout = 5000)]
-    public void HandleConnectionFailure_via_OutboundWriteFailed_with_upstream_finished_should_complete_stage()
-    {
-        var (sm, ops) = CreateStateMachine();
-        sm.Start();
-        sm.HandleUpstreamFinish();
-        ops.CompleteStageCount = 0;
-        ops.PushedInbound.Clear();
-
-        sm.Dispatch(new OutboundWriteFailed(new IOException("test"), 0));
-
-        Assert.True(ops.CompleteStageCount > 0);
     }
 
     [Fact(Timeout = 5000)]
@@ -266,7 +264,7 @@ public sealed class QuicServerStateMachineSpec
         ops.PushedInbound.Clear();
 
         sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new StreamHandle(Stream.Null), 1));
+        sm.Dispatch(new StreamLeaseAcquired(Stream.Null, 1));
         ops.PushedInbound.Clear();
 
         sm.HandlePush(new ResetStream(1));
@@ -275,29 +273,29 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_InboundComplete_error_should_push_StreamClosed()
+    public void Dispatch_PipeStreamReadFailed_should_push_StreamClosed()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
         sm.HandlePush(new OpenStream(1, StreamDirection.Bidirectional));
-        sm.Dispatch(new StreamLeaseAcquired(new StreamHandle(Stream.Null), 1));
+        sm.Dispatch(new StreamLeaseAcquired(new MemoryStream(), 1));
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new InboundComplete(DisconnectReason.Error, 1, 1));
+        sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), 1, 1));
 
         Assert.Contains(ops.PushedInbound,
             item => item is StreamClosed { Id.Value: 1, Reason: DisconnectReason.Error });
     }
 
     [Fact(Timeout = 5000)]
-    public void OnStreamLeaseAcquired_with_unknown_stream_should_dispose_handle()
+    public void OnStreamLeaseAcquired_with_unknown_stream_should_dispose_stream()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new StreamLeaseAcquired(new StreamHandle(Stream.Null), 999));
+        sm.Dispatch(new StreamLeaseAcquired(Stream.Null, 999));
 
         Assert.DoesNotContain(ops.PushedInbound, item => item is StreamOpened { Id.Value: 999 });
     }
@@ -329,18 +327,6 @@ public sealed class QuicServerStateMachineSpec
         sm.HandleDownstreamFinish();
 
         sm.PostStop();
-    }
-
-    [Fact(Timeout = 5000)]
-    public void Dispatch_OutboundWriteDone_should_signal_pull()
-    {
-        var (sm, ops) = CreateStateMachine();
-        sm.Start();
-        ops.PullOutboundCount = 0;
-
-        sm.Dispatch(new OutboundWriteDone());
-
-        Assert.True(ops.PullOutboundCount > 0);
     }
 
     [Fact(Timeout = 5000)]

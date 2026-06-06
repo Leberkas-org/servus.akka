@@ -1,3 +1,4 @@
+using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 
@@ -15,9 +16,9 @@ internal sealed class QuicServerStateMachine(
     private int _connectionGen;
     private bool _upstreamFinished;
     private EndPoint? _lastRemoteEndPoint;
+    private CancellationTokenSource? _acceptCts;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
-    private QuicPumpManager? _pumpManager;
 
     public void Start()
     {
@@ -25,8 +26,7 @@ internal sealed class QuicServerStateMachine(
         _lastRemoteEndPoint = connectionHandle.RemoteEndPoint();
         ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
 
-        _pumpManager = new QuicPumpManager(self);
-        _pumpManager.StartAcceptLoop(connectionHandle);
+        StartAcceptLoop();
 
         ops.OnPushInbound(new TransportConnected(connectionInfo));
     }
@@ -35,38 +35,23 @@ internal sealed class QuicServerStateMachine(
     {
         switch (evt)
         {
-            case InboundData e:
+            case PipeStreamReadComplete e:
                 if (e.Gen == _connectionGen)
                 {
-                    ops.OnPushInbound(new MultiplexedData(e.Buffer, StreamTarget.FromId(e.StreamId)));
+                    OnPipeStreamReadComplete(e);
                 }
-                else
+                break;
+            case PipeStreamReadFailed e:
+                if (e.Gen == _connectionGen)
                 {
-                    e.Buffer.Dispose();
+                    OnPipeStreamReadFailed(e);
                 }
-
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
                 break;
             case StreamLeaseAcquired e:
-                OnStreamLeaseAcquired(e.Handle, e.StreamId);
-                break;
-            case InboundComplete e:
-                if (e.Gen == _connectionGen)
-                {
-                    OnInboundComplete(e.Reason, e.StreamId);
-                }
-
-                break;
-            case InboundPumpFailed e:
-                OnInboundComplete(DisconnectReason.Error, e.StreamId);
-                break;
-            case OutboundWriteDone:
-                ops.OnSignalPullOutbound();
-                break;
-            case OutboundWriteFailed:
-                HandleConnectionFailure(DisconnectReason.Error);
+                OnStreamLeaseAcquired(e.Stream, e.StreamId);
                 break;
             case MigrationDetected e:
                 ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
@@ -100,7 +85,7 @@ internal sealed class QuicServerStateMachine(
     public void HandleUpstreamFinish()
     {
         _upstreamFinished = true;
-        _pumpManager?.StopAll();
+        StopAcceptLoop();
         ops.OnCompleteStage();
     }
 
@@ -132,7 +117,7 @@ internal sealed class QuicServerStateMachine(
         var sid = streamId.Value;
         connectionHandle.OpenStreamAsync(direction)
             .PipeTo(self,
-                success: result => new StreamLeaseAcquired(new StreamHandle(result.Stream), sid),
+                success: result => new StreamLeaseAcquired(result.Stream, sid),
                 failure: ex => new AcquisitionFailed(ex));
 
         ops.OnSignalPullOutbound();
@@ -179,19 +164,19 @@ internal sealed class QuicServerStateMachine(
         ops.OnSignalPullOutbound();
     }
 
-    private void OnStreamLeaseAcquired(StreamHandle handle, long rawStreamId)
+    private void OnStreamLeaseAcquired(Stream stream, long rawStreamId)
     {
         var streamId = StreamTarget.FromId(rawStreamId);
         if (!_streams.TryGetValue(streamId, out var state))
         {
-            _ = handle.DisposeAsync();
+            stream.Dispose();
             return;
         }
 
-        state.AttachHandle(handle);
+        state.AttachConnection(stream);
         if (state.Direction == StreamDirection.Bidirectional)
         {
-            _pumpManager?.StartInboundPump(handle, rawStreamId, _connectionGen);
+            RequestStreamRead(streamId, _connectionGen);
         }
 
         ops.OnPushInbound(new StreamOpened(streamId, state.Direction));
@@ -200,16 +185,66 @@ internal sealed class QuicServerStateMachine(
     private void OnInboundStreamAccepted(Stream stream, long rawStreamId)
     {
         var streamId = StreamTarget.FromId(rawStreamId);
-        var handle = new StreamHandle(stream);
         var direction = (rawStreamId & 0x02) != 0
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
         var state = new QuicStreamState(direction);
-        state.AttachHandle(handle);
+        state.AttachConnection(stream);
         _streams[streamId] = state;
 
-        _pumpManager?.StartInboundPump(handle, rawStreamId, _connectionGen);
+        RequestStreamRead(streamId, _connectionGen);
         ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
+    }
+
+    private void RequestStreamRead(StreamTarget streamId, int gen)
+    {
+        if (!_streams.TryGetValue(streamId, out var state) || state.InputReader is null)
+        {
+            return;
+        }
+
+        state.AdvancePendingRead();
+
+        state.InputReader.ReadAsync().AsTask().PipeTo(self,
+            success: result => new PipeStreamReadComplete(result, streamId.Value, gen),
+            failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));
+    }
+
+    private void OnPipeStreamReadComplete(PipeStreamReadComplete evt)
+    {
+        var streamId = StreamTarget.FromId(evt.StreamId);
+        if (!_streams.TryGetValue(streamId, out var state))
+        {
+            return;
+        }
+
+        var result = evt.Result;
+        if (result.Buffer.Length > 0)
+        {
+            var length = (int)result.Buffer.Length;
+            var buf = TransportBuffer.Rent(length);
+            result.Buffer.CopyTo(buf.FullMemory.Span);
+            buf.Length = length;
+            state.SetPendingAdvance(result.Buffer.End);
+            ops.OnPushInbound(new MultiplexedData(buf, streamId));
+        }
+        else
+        {
+            state.InputReader?.AdvanceTo(result.Buffer.End);
+        }
+
+        if (result.IsCompleted || result.IsCanceled)
+        {
+            OnInboundComplete(DisconnectReason.Graceful, evt.StreamId);
+            return;
+        }
+
+        RequestStreamRead(streamId, _connectionGen);
+    }
+
+    private void OnPipeStreamReadFailed(PipeStreamReadFailed evt)
+    {
+        OnInboundComplete(DisconnectReason.Error, evt.StreamId);
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)
@@ -251,7 +286,7 @@ internal sealed class QuicServerStateMachine(
         _streams.Clear();
 
         ops.OnPushInbound(new TransportDisconnected(reason));
-        _pumpManager?.StopAll();
+        StopAcceptLoop();
 
         if (_upstreamFinished)
         {
@@ -279,11 +314,51 @@ internal sealed class QuicServerStateMachine(
         }
     }
 
+    private void StartAcceptLoop()
+    {
+        _acceptCts?.Cancel();
+        _acceptCts?.Dispose();
+        _acceptCts = new CancellationTokenSource();
+        _ = AcceptLoopAsync(connectionHandle, self, _acceptCts.Token);
+    }
+
+    private void StopAcceptLoop()
+    {
+        _acceptCts?.Cancel();
+        _acceptCts?.Dispose();
+        _acceptCts = null;
+    }
+
+    private static async Task AcceptLoopAsync(
+        QuicConnectionHandle handle, IActorRef self, CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            var result = await handle.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+
+            if (ct.IsCancellationRequested)
+            {
+                if (result is not null)
+                {
+                    await result.Value.Stream.DisposeAsync().ConfigureAwait(false);
+                }
+
+                return;
+            }
+
+            if (result is null)
+            {
+                continue;
+            }
+
+            self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
+        }
+    }
+
     private void Cleanup()
     {
         _connectionGen++;
-        _pumpManager?.StopAll();
-        _pumpManager = null;
+        StopAcceptLoop();
 
         foreach (var (_, state) in _streams)
         {
