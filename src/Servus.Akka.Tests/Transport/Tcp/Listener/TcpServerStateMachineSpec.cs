@@ -172,8 +172,8 @@ public sealed class TcpServerStateMachineSpec
         ops.PushedInbound.Clear();
 
         var pipe = new Pipe();
-        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }).AsTask().Wait();
-        var readResult = pipe.Reader.ReadAsync().AsTask().Result;
+        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken).AsTask().Wait(TestContext.Current.CancellationToken);
+        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
 
         sm.Dispatch(new PipeReadComplete(readResult, 1));
 
@@ -195,7 +195,7 @@ public sealed class TcpServerStateMachineSpec
 
         var pipe = new Pipe();
         pipe.Writer.Complete();
-        var readResult = pipe.Reader.ReadAsync().AsTask().Result;
+        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
 
         sm.Dispatch(new PipeReadComplete(readResult, 1));
 
@@ -224,8 +224,8 @@ public sealed class TcpServerStateMachineSpec
         ops.PushedInbound.Clear();
 
         var pipe = new Pipe();
-        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }).AsTask().Wait();
-        var readResult = pipe.Reader.ReadAsync().AsTask().Result;
+        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken).AsTask().Wait(TestContext.Current.CancellationToken);
+        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
 
         sm.Dispatch(new PipeReadComplete(readResult, 999));
 

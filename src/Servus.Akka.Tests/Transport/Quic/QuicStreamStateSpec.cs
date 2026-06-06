@@ -67,7 +67,7 @@ public sealed class QuicStreamStateSpec
         await state.CompleteAndDrainOutputAsync();
         stream.Position = 0;
         var data = new byte[2];
-        var read = await stream.ReadAsync(data);
+        var read = await stream.ReadAsync(data, TestContext.Current.CancellationToken);
         Assert.Equal(2, read);
         Assert.Equal(0x01, data[0]);
         Assert.Equal(0x02, data[1]);

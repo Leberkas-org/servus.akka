@@ -18,8 +18,8 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 
         var endpoint = (IPEndPoint)_listener.LocalEndPoint!;
         _client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-        await _client.ConnectAsync(endpoint);
-        _server = await _listener.AcceptAsync();
+        await _client.ConnectAsync(endpoint, TestContext.Current.CancellationToken);
+        _server = await _listener.AcceptAsync(TestContext.Current.CancellationToken);
     }
 
     public ValueTask DisposeAsync()
@@ -36,9 +36,9 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         await using var connection = SocketPipeConnection.Create(_client);
 
         var sent = "hello from server"u8.ToArray();
-        await _server.SendAsync(sent, SocketFlags.None);
+        await _server.SendAsync(sent, SocketFlags.None, TestContext.Current.CancellationToken);
 
-        var result = await connection.InputReader.ReadAsync();
+        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
         var received = System.Text.Encoding.UTF8.GetString(result.Buffer.FirstSpan);
         connection.InputReader.AdvanceTo(result.Buffer.End);
 
@@ -51,10 +51,10 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         await using var connection = SocketPipeConnection.Create(_client);
 
         var data = "hello from client"u8.ToArray();
-        await connection.OutputWriter.WriteAsync(data);
+        await connection.OutputWriter.WriteAsync(data, TestContext.Current.CancellationToken);
 
         var buffer = new byte[1024];
-        var received = await _server.ReceiveAsync(buffer, SocketFlags.None);
+        var received = await _server.ReceiveAsync(buffer, SocketFlags.None, TestContext.Current.CancellationToken);
 
         Assert.Equal("hello from client", System.Text.Encoding.UTF8.GetString(buffer, 0, received));
     }
@@ -66,7 +66,7 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 
         _server.Shutdown(SocketShutdown.Send);
 
-        var result = await connection.InputReader.ReadAsync();
+        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
 
         Assert.True(result.IsCompleted);
         Assert.True(result.Buffer.IsEmpty);
@@ -88,16 +88,16 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         // Send 2KB which exceeds the 1KB pause threshold
         var payload = new byte[2 * 1024];
         Array.Fill(payload, (byte)'X');
-        await _server.SendAsync(payload, SocketFlags.None);
+        await _server.SendAsync(payload, SocketFlags.None, TestContext.Current.CancellationToken);
 
         // Give the receive loop time to read and hit backpressure
-        await Task.Delay(200);
+        await Task.Delay(200, TestContext.Current.CancellationToken);
 
         // Read data from the pipe to verify it arrived
         var totalRead = 0L;
         while (totalRead < payload.Length)
         {
-            var result = await connection.InputReader.ReadAsync();
+            var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
             totalRead += result.Buffer.Length;
             connection.InputReader.AdvanceTo(result.Buffer.End);
         }
@@ -112,9 +112,9 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         await using var connection = SocketPipeConnection.Create(stream);
 
         var sent = "stream data"u8.ToArray();
-        await _server.SendAsync(sent, SocketFlags.None);
+        await _server.SendAsync(sent, SocketFlags.None, TestContext.Current.CancellationToken);
 
-        var result = await connection.InputReader.ReadAsync();
+        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
         var received = System.Text.Encoding.UTF8.GetString(result.Buffer.FirstSpan);
         connection.InputReader.AdvanceTo(result.Buffer.End);
 
@@ -122,10 +122,10 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 
         // Verify output direction works too
         var outData = "stream reply"u8.ToArray();
-        await connection.OutputWriter.WriteAsync(outData);
+        await connection.OutputWriter.WriteAsync(outData, TestContext.Current.CancellationToken);
 
         var buffer = new byte[1024];
-        var bytesReceived = await _server.ReceiveAsync(buffer, SocketFlags.None);
+        var bytesReceived = await _server.ReceiveAsync(buffer, SocketFlags.None, TestContext.Current.CancellationToken);
         Assert.Equal("stream reply", System.Text.Encoding.UTF8.GetString(buffer, 0, bytesReceived));
     }
 
@@ -142,13 +142,13 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         mem.Span[2] = 0xCC;
         mem.Span[3] = 0xDD;
         writer.Advance(4);
-        await writer.FlushAsync();
+        await writer.FlushAsync(TestContext.Current.CancellationToken);
 
         await connection.CompleteAndDrainOutputAsync();
 
         memStream.Position = 0;
         var data = new byte[4];
-        var read = await memStream.ReadAsync(data);
+        var read = await memStream.ReadAsync(data, TestContext.Current.CancellationToken);
         Assert.Equal(4, read);
         Assert.Equal(0xAA, data[0]);
         Assert.Equal(0xDD, data[3]);
