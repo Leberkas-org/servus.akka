@@ -1,3 +1,5 @@
+using System.IO.Pipelines;
+
 namespace Servus.Akka.Transport.Tcp;
 
 internal interface ITcpTransportEvent;
@@ -15,3 +17,7 @@ internal readonly record struct InboundPumpFailed(Exception Error) : ITcpTranspo
 internal readonly record struct OutboundWriteDone(int Gen) : ITcpTransportEvent;
 
 internal readonly record struct OutboundWriteFailed(Exception Error) : ITcpTransportEvent;
+
+internal readonly record struct PipeReadComplete(ReadResult Result, int Gen) : ITcpTransportEvent;
+
+internal readonly record struct PipeReadFailed(Exception Error, int Gen) : ITcpTransportEvent;
