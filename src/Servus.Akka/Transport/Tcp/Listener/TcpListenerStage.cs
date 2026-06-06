@@ -185,12 +185,20 @@ internal sealed class TcpListenerStage
                 tlsResult.Security is not null ? TransportProtocol.Tls : TransportProtocol.Tcp,
                 tlsResult.Security);
 
-            var connectionFlow = Flow.FromGraph(
-                new TcpServerConnectionStage(
-                    tlsResult.Stream,
-                    connectionInfo,
-                    tlsResult.SslStream,
-                    tlsResult.AllowDelayedNegotiation));
+            GraphStage<FlowShape<ITransportOutbound, ITransportInbound>> connectionStage =
+                _stage._options.UsePipeTransport
+                    ? new PipeServerConnectionStage(
+                        tlsResult.Stream,
+                        connectionInfo,
+                        tlsResult.SslStream,
+                        tlsResult.AllowDelayedNegotiation)
+                    : new TcpServerConnectionStage(
+                        tlsResult.Stream,
+                        connectionInfo,
+                        tlsResult.SslStream,
+                        tlsResult.AllowDelayedNegotiation);
+
+            var connectionFlow = Flow.FromGraph(connectionStage);
 
             _self.Tell(new TcpConnectionReady(connectionFlow));
         }

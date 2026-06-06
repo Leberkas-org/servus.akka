@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Security;
 using Akka.Actor;
@@ -15,6 +16,7 @@ internal sealed class PipeServerStateMachine(
 {
     private SocketPipeConnection? _connection;
     private readonly LeaseTracker _leaseTracker = new(8);
+    private SequencePosition? _pendingAdvance;
     private int _connectionGen;
     private bool _upstreamFinished;
 
@@ -97,6 +99,12 @@ internal sealed class PipeServerStateMachine(
             return;
         }
 
+        if (_pendingAdvance is { } pos)
+        {
+            _pendingAdvance = null;
+            _connection.InputReader.AdvanceTo(pos);
+        }
+
         var gen = _connectionGen;
         _connection.InputReader.ReadAsync().AsTask().PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
@@ -124,8 +132,12 @@ internal sealed class PipeServerStateMachine(
     {
         if (result.Buffer.Length > 0)
         {
-            var lease = _leaseTracker.Acquire(result.Buffer, _connection!.InputReader);
-            ops.OnPushInbound(lease);
+            var length = (int)result.Buffer.Length;
+            var buf = TransportBuffer.Rent(length);
+            result.Buffer.CopyTo(buf.FullMemory.Span);
+            buf.Length = length;
+            _pendingAdvance = result.Buffer.End;
+            ops.OnPushInbound(new TransportData(buf));
         }
 
         if (result.IsCompleted || result.IsCanceled)

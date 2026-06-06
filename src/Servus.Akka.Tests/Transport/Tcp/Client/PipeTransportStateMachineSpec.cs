@@ -345,12 +345,10 @@ public sealed class PipeTransportStateMachineSpec
 
         Assert.Single(ops.PushedInbound);
         var pushed = ops.PushedInbound[0];
-        Assert.IsType<PipeSegmentLease>(pushed);
-        var segLease = (PipeSegmentLease)pushed;
-        Assert.Equal(3, segLease.Length);
+        var transportData = Assert.IsType<TransportData>(pushed);
+        Assert.Equal(3, transportData.Buffer.Length);
 
-        // AdvanceTo the buffer to satisfy PipeReader state before cleanup
-        pipe.Reader.AdvanceTo(readResult.Buffer.End);
+        transportData.Buffer.Dispose();
         pipe.Writer.Complete();
         pipe.Reader.Complete();
     }

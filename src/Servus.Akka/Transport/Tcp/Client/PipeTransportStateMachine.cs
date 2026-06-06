@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Pipelines;
 using Akka.Actor;
 using static Servus.Senf;
@@ -22,6 +23,7 @@ public sealed class PipeTransportStateMachine(
     private readonly Queue<TransportBuffer> _pendingWrites = new();
     private readonly LeaseTracker _leaseTracker = new(16);
 
+    private SequencePosition? _pendingAdvance;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
@@ -123,6 +125,12 @@ public sealed class PipeTransportStateMachine(
             return;
         }
 
+        if (_pendingAdvance is { } pos)
+        {
+            _pendingAdvance = null;
+            _connection.InputReader.AdvanceTo(pos);
+        }
+
         var gen = _connectionGen;
         _connection.InputReader.ReadAsync().AsTask().PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
@@ -185,6 +193,7 @@ public sealed class PipeTransportStateMachine(
         }
 
         FlushPendingWrites();
+        RequestRead();
     }
 
     private void OnAcquisitionFailed(Exception ex)
@@ -211,8 +220,12 @@ public sealed class PipeTransportStateMachine(
     {
         if (result.Buffer.Length > 0)
         {
-            var lease = _leaseTracker.Acquire(result.Buffer, _connection!.InputReader);
-            ops.OnPushInbound(lease);
+            var length = (int)result.Buffer.Length;
+            var buf = TransportBuffer.Rent(length);
+            result.Buffer.CopyTo(buf.FullMemory.Span);
+            buf.Length = length;
+            _pendingAdvance = result.Buffer.End;
+            ops.OnPushInbound(new TransportData(buf));
         }
 
         if (result.IsCompleted || result.IsCanceled)
@@ -307,6 +320,7 @@ public sealed class PipeTransportStateMachine(
     private void CleanupTransport()
     {
         _connectionGen++;
+        _pendingAdvance = null;
         _leaseTracker.ForceReturnAll();
         DisposeConnection();
 

@@ -180,10 +180,10 @@ public sealed class PipeServerStateMachineSpec
         sm.Dispatch(new PipeReadComplete(readResult, 1));
 
         Assert.Single(ops.PushedInbound);
-        var lease = Assert.IsType<PipeSegmentLease>(ops.PushedInbound[0]);
-        Assert.Equal(3, lease.Length);
+        var transportData = Assert.IsType<TransportData>(ops.PushedInbound[0]);
+        Assert.Equal(3, transportData.Buffer.Length);
 
-        pipe.Reader.AdvanceTo(readResult.Buffer.End);
+        transportData.Buffer.Dispose();
         pipe.Writer.Complete();
         pipe.Reader.Complete();
     }
