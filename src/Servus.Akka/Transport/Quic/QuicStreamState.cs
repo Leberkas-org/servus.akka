@@ -1,3 +1,7 @@
+using System.IO.Pipelines;
+using System.Net.Quic;
+using Servus.Akka.Transport.Tcp;
+
 namespace Servus.Akka.Transport.Quic;
 
 internal enum StreamPhase
@@ -9,26 +13,29 @@ internal enum StreamPhase
     Closed
 }
 
-internal sealed class QuicStreamState(StreamDirection direction)
+internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposable
 {
-    private StreamHandle? _handle;
+    private SocketPipeConnection? _connection;
+    private Stream? _stream;
     private Queue<TransportBuffer>? _openingBuffer = new();
+    private SequencePosition? _pendingAdvance;
 
     public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
     public StreamDirection Direction { get; } = direction;
-    public bool HasHandle => _handle is not null;
     public int PendingWriteCount => _openingBuffer?.Count ?? 0;
     public bool IsCompleteWritesDeferred { get; private set; }
+    public PipeReader? InputReader => _connection?.InputReader;
 
-    public void AttachHandle(StreamHandle handle)
+    public void AttachConnection(Stream stream)
     {
-        _handle = handle;
+        _stream = stream;
+        _connection = SocketPipeConnection.Create(stream);
 
         if (_openingBuffer is not null)
         {
             while (_openingBuffer.TryDequeue(out var buf))
             {
-                _handle.Write(buf);
+                WriteToOutputPipe(buf);
             }
 
             _openingBuffer = null;
@@ -37,7 +44,7 @@ internal sealed class QuicStreamState(StreamDirection direction)
         if (IsCompleteWritesDeferred)
         {
             IsCompleteWritesDeferred = false;
-            _handle.CompleteWrites();
+            CompleteWritesInternal();
             Phase = StreamPhase.HalfClosedWrite;
         }
         else
@@ -48,13 +55,13 @@ internal sealed class QuicStreamState(StreamDirection direction)
 
     public void Write(TransportBuffer buffer)
     {
-        if (_handle is null)
+        if (_connection is null)
         {
             _openingBuffer?.Enqueue(buffer);
             return;
         }
 
-        _handle.Write(buffer);
+        WriteToOutputPipe(buffer);
     }
 
     public void CompleteWrites()
@@ -65,11 +72,11 @@ internal sealed class QuicStreamState(StreamDirection direction)
                 IsCompleteWritesDeferred = true;
                 return;
             case StreamPhase.Active:
-                _handle?.CompleteWrites();
+                CompleteWritesInternal();
                 Phase = StreamPhase.HalfClosedWrite;
                 return;
             case StreamPhase.HalfClosedRead:
-                _handle?.CompleteWrites();
+                CompleteWritesInternal();
                 Phase = StreamPhase.Closed;
                 return;
         }
@@ -87,8 +94,57 @@ internal sealed class QuicStreamState(StreamDirection direction)
 
     public void Abort(long errorCode)
     {
-        _handle?.Abort(errorCode);
+        if (_stream is QuicStream qs)
+        {
+            qs.Abort(QuicAbortDirection.Both, errorCode);
+        }
+
         Phase = StreamPhase.Closed;
+    }
+
+    public void SetPendingAdvance(SequencePosition position)
+    {
+        _pendingAdvance = position;
+    }
+
+    public void AdvancePendingRead()
+    {
+        if (_pendingAdvance is { } pos && _connection is not null)
+        {
+            _pendingAdvance = null;
+            _connection.InputReader.AdvanceTo(pos);
+        }
+    }
+
+    public Task CompleteAndDrainOutputAsync()
+    {
+        return _connection?.CompleteAndDrainOutputAsync() ?? Task.CompletedTask;
+    }
+
+    private void WriteToOutputPipe(TransportBuffer data)
+    {
+        var writer = _connection!.OutputWriter;
+        var mem = writer.GetMemory(data.Length);
+        data.Memory.Span.CopyTo(mem.Span);
+        writer.Advance(data.Length);
+        data.Dispose();
+        _ = writer.FlushAsync();
+    }
+
+    private void CompleteWritesInternal()
+    {
+        if (_connection is null)
+        {
+            return;
+        }
+
+        _ = _connection.CompleteAndDrainOutputAsync().ContinueWith(_ =>
+        {
+            if (_stream is QuicStream qs)
+            {
+                qs.CompleteWrites();
+            }
+        }, TaskContinuationOptions.ExecuteSynchronously);
     }
 
     private void DisposePendingWrites()
@@ -106,11 +162,14 @@ internal sealed class QuicStreamState(StreamDirection direction)
 
     public async ValueTask DisposeAsync()
     {
+        _pendingAdvance = null;
         DisposePendingWrites();
-        if (_handle is not null)
+        if (_connection is not null)
         {
-            await _handle.DisposeAsync().ConfigureAwait(false);
-            _handle = null;
+            await _connection.DisposeAsync().ConfigureAwait(false);
+            _connection = null;
         }
+
+        _stream = null;
     }
 }

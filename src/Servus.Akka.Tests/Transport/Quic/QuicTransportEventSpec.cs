@@ -1,3 +1,4 @@
+using System.IO.Pipelines;
 using System.Net;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Quic;
@@ -27,15 +28,14 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void StreamLeaseAcquired_should_implement_IQuicTransportEvent()
+    public void StreamLeaseAcquired_should_carry_Stream_and_StreamId()
     {
         var stream = new MemoryStream();
-        var handle = new StreamHandle(stream);
         const long streamId = 42L;
 
-        var evt = new StreamLeaseAcquired(handle, streamId);
+        var evt = new StreamLeaseAcquired(stream, streamId);
 
-        Assert.Same(handle, evt.Handle);
+        Assert.Same(stream, evt.Stream);
         Assert.Equal(streamId, evt.StreamId);
     }
 
@@ -49,24 +49,41 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void InboundData_should_implement_IQuicTransportEvent()
+    public void PipeStreamReadComplete_should_carry_ReadResult_StreamId_Gen()
     {
-        var buffer = TransportBuffer.Rent(16);
-        try
-        {
-            const long streamId = 123L;
-            const int gen = 5;
+        var pipe = new Pipe();
+        var mem = pipe.Writer.GetMemory(1);
+        mem.Span[0] = 0xAB;
+        pipe.Writer.Advance(1);
+        pipe.Writer.FlushAsync().AsTask().Wait();
+        var result = pipe.Reader.ReadAsync().AsTask().Result;
 
-            var evt = new InboundData(buffer, streamId, gen);
+        const long streamId = 123L;
+        const int gen = 5;
 
-            Assert.NotNull(evt.Buffer);
-            Assert.Equal(streamId, evt.StreamId);
-            Assert.Equal(gen, evt.Gen);
-        }
-        finally
-        {
-            buffer.Dispose();
-        }
+        var evt = new PipeStreamReadComplete(result, streamId, gen);
+
+        Assert.Equal(streamId, evt.StreamId);
+        Assert.Equal(gen, evt.Gen);
+        Assert.True(evt.Result.Buffer.Length > 0);
+
+        pipe.Reader.AdvanceTo(result.Buffer.End);
+        pipe.Reader.CompleteAsync().AsTask().Wait();
+        pipe.Writer.CompleteAsync().AsTask().Wait();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void PipeStreamReadFailed_should_carry_Error_StreamId_Gen()
+    {
+        var error = new IOException("Read failed");
+        const long streamId = 789L;
+        const int gen = 3;
+
+        var evt = new PipeStreamReadFailed(error, streamId, gen);
+
+        Assert.Same(error, evt.Error);
+        Assert.Equal(streamId, evt.StreamId);
+        Assert.Equal(gen, evt.Gen);
     }
 
     [Fact(Timeout = 5000)]
@@ -82,54 +99,6 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void InboundComplete_should_implement_IQuicTransportEvent()
-    {
-        const DisconnectReason reason = DisconnectReason.Graceful;
-        const int gen = 3;
-        const long streamId = 456L;
-
-        var evt = new InboundComplete(reason, gen, streamId);
-
-        Assert.Equal(reason, evt.Reason);
-        Assert.Equal(gen, evt.Gen);
-        Assert.Equal(streamId, evt.StreamId);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void InboundPumpFailed_should_implement_IQuicTransportEvent()
-    {
-        var error = new TimeoutException("Pump failed");
-        const long streamId = 789L;
-
-        var evt = new InboundPumpFailed(error, streamId);
-
-        Assert.Same(error, evt.Error);
-        Assert.Equal(streamId, evt.StreamId);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void OutboundWriteDone_should_implement_IQuicTransportEvent()
-    {
-        const long streamId = 321L;
-
-        var evt = new OutboundWriteDone(streamId);
-
-        Assert.Equal(streamId, evt.StreamId);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void OutboundWriteFailed_should_implement_IQuicTransportEvent()
-    {
-        var error = new IOException("Write failed");
-        const long streamId = 654L;
-
-        var evt = new OutboundWriteFailed(error, streamId);
-
-        Assert.Same(error, evt.Error);
-        Assert.Equal(streamId, evt.StreamId);
-    }
-
-    [Fact(Timeout = 5000)]
     public void MigrationDetected_should_implement_IQuicTransportEvent()
     {
         var oldEndPoint = new IPEndPoint(IPAddress.Loopback, 8000);
@@ -140,5 +109,4 @@ public sealed class QuicTransportEventSpec
         Assert.Same(oldEndPoint, evt.OldEndPoint);
         Assert.Same(newEndPoint, evt.NewEndPoint);
     }
-
 }
