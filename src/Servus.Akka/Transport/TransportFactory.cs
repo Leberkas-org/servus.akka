@@ -18,9 +18,11 @@ public static class TransportFactory
         QuicListenerOptions options)
         => new QuicListenerFactory().Bind(options);
 
-    public static Flow<ITransportOutbound, ITransportInbound, NotUsed> CreateTcpClient(IActorRef connectionManager,
-        IPoolingStrategy poolingStrategy)
-        => new TcpTransportFactory(connectionManager, poolingStrategy).Create();
+    public static Flow<ITransportOutbound, ITransportInbound, NotUsed> CreateTcpClient(
+        IActorRef connectionManager,
+        IPoolingStrategy poolingStrategy,
+        bool usePipeTransport = false)
+        => new TcpTransportFactory(connectionManager, poolingStrategy, usePipeTransport).Create();
 
     public static Flow<ITransportOutbound, ITransportInbound, NotUsed> CreateQuicClient(IActorRef connectionManager)
         => new QuicTransportFactory(connectionManager).Create();

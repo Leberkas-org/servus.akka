@@ -8,4 +8,5 @@ public sealed record TcpTransportOptions : TransportOptions
     public IWebProxy? Proxy { get; init; }
     public ICredentials? DefaultProxyCredentials { get; init; }
     public bool AutoReconnect { get; init; }
+    public bool UsePipeTransport { get; init; }
 }
