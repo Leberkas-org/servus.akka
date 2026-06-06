@@ -1,6 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
 using Akka.Actor;
-using Akka.Event;
 using Akka.Streams;
 using Akka.Streams.Stage;
 

@@ -1,6 +1,5 @@
 using System.IO.Pipelines;
 using System.Net.Quic;
-using Servus.Akka.Transport.Tcp;
 
 namespace Servus.Akka.Transport.Quic;
 

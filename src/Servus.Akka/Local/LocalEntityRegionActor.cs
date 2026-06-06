@@ -1,6 +1,5 @@
 using Akka.Actor;
 using Akka.Event;
-using Akka.Util.Internal;
 
 namespace Servus.Akka.Local;
 
