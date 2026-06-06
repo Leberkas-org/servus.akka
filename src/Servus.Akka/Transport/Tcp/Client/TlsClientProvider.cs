@@ -54,16 +54,9 @@ internal class TlsClientProvider(TlsTransportOptions options) : IAsyncDisposable
             ApplicationProtocols = options.ApplicationProtocols,
         };
 
-        try
-        {
-            await _sslStream.AuthenticateAsClientAsync(authOptions, ct)
-                .WaitAsync(options.ConnectTimeout, ct)
-                .ConfigureAwait(false);
-        }
-        catch
-        {
-            throw;
-        }
+        await _sslStream.AuthenticateAsClientAsync(authOptions, ct)
+            .WaitAsync(options.ConnectTimeout, ct)
+            .ConfigureAwait(false);
 
         return _sslStream;
     }
@@ -146,6 +139,7 @@ internal class TlsClientProvider(TlsTransportOptions options) : IAsyncDisposable
             }
             catch (ObjectDisposedException)
             {
+                // noop
             }
             finally
             {

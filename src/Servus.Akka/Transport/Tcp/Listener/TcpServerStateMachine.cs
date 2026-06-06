@@ -108,7 +108,7 @@ internal sealed class TcpServerStateMachine(
         }
 
         var gen = _connectionGen;
-        _connection.InputReader.ReadAsync().AsTask().PipeTo(self,
+        _connection.InputReader.ReadAsync().PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
             failure: ex => new PipeReadFailed(ex, gen));
     }

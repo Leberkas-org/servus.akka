@@ -40,12 +40,14 @@ internal sealed class QuicServerStateMachine(
                 {
                     OnPipeStreamReadComplete(e);
                 }
+
                 break;
             case PipeStreamReadFailed e:
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeStreamReadFailed(e);
                 }
+
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
@@ -212,7 +214,7 @@ internal sealed class QuicServerStateMachine(
         }
 
         var reader = state.InputReader;
-        reader.ReadAsync().AsTask().PipeTo(self,
+        reader.ReadAsync().PipeTo(self,
             success: result =>
             {
                 TransportBuffer? buf = null;
@@ -233,7 +235,7 @@ internal sealed class QuicServerStateMachine(
     private void OnPipeStreamReadComplete(PipeStreamReadComplete evt)
     {
         var streamId = StreamTarget.FromId(evt.StreamId);
-        if (!_streams.TryGetValue(streamId, out var state))
+        if (!_streams.TryGetValue(streamId, out _))
         {
             evt.Buffer?.Dispose();
             return;

@@ -2,7 +2,7 @@ using System.Net;
 using System.Net.Sockets;
 using Servus.Akka.Transport;
 
-namespace Servus.Akka.Tests.Transport.Tcp;
+namespace Servus.Akka.Tests.Transport;
 
 public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 {

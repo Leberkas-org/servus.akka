@@ -136,7 +136,7 @@ public sealed class TcpConnectionStateMachine(
         }
 
         var gen = _connectionGen;
-        connection.InputReader.ReadAsync().AsTask().PipeTo(self,
+        connection.InputReader.ReadAsync().PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
             failure: ex => new PipeReadFailed(ex, gen));
     }

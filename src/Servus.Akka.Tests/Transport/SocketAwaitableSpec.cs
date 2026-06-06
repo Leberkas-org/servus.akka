@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
-using Servus.Akka.Transport.Tcp;
+using Servus.Akka.Transport;
 
-namespace Servus.Akka.Tests.Transport.Tcp;
+namespace Servus.Akka.Tests.Transport;
 
 public sealed class SocketAwaitableSpec : IAsyncLifetime
 {
@@ -24,9 +24,9 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
 
     public ValueTask DisposeAsync()
     {
-        _server?.Dispose();
-        _client?.Dispose();
-        _listener?.Dispose();
+        _server.Dispose();
+        _client.Dispose();
+        _listener.Dispose();
         return ValueTask.CompletedTask;
     }
 
@@ -34,7 +34,7 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
     public async Task ReceiveAsync_should_receive_sent_bytes()
     {
         var awaitable = new SocketAwaitable();
-        var sent = System.Text.Encoding.UTF8.GetBytes("hello");
+        var sent = "hello"u8.ToArray();
         await _server.SendAsync(sent, SocketFlags.None);
 
         var buffer = new byte[1024];
@@ -62,7 +62,7 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
         var awaitable = new SocketAwaitable();
 
         var waitTask = awaitable.WaitForDataAsync(_client);
-        await _server.SendAsync(System.Text.Encoding.UTF8.GetBytes("ping"), SocketFlags.None);
+        await _server.SendAsync("ping"u8.ToArray(), SocketFlags.None);
 
         var result = await waitTask;
         Assert.Equal(0, result);
@@ -72,7 +72,7 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
     public async Task SendAsync_should_send_bytes()
     {
         var awaitable = new SocketAwaitable();
-        var data = System.Text.Encoding.UTF8.GetBytes("world");
+        var data = "world"u8.ToArray();
 
         var bytesSent = await awaitable.SendAsync(_client, data);
 
@@ -89,11 +89,11 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
         var awaitable = new SocketAwaitable();
         var buffer = new byte[1024];
 
-        await _server.SendAsync(System.Text.Encoding.UTF8.GetBytes("one"), SocketFlags.None);
+        await _server.SendAsync("one"u8.ToArray(), SocketFlags.None);
         var first = await awaitable.ReceiveAsync(_client, buffer);
         Assert.Equal("one", System.Text.Encoding.UTF8.GetString(buffer, 0, first));
 
-        await _server.SendAsync(System.Text.Encoding.UTF8.GetBytes("two"), SocketFlags.None);
+        await _server.SendAsync("two"u8.ToArray(), SocketFlags.None);
         var second = await awaitable.ReceiveAsync(_client, buffer);
         Assert.Equal("two", System.Text.Encoding.UTF8.GetString(buffer, 0, second));
     }
