@@ -86,8 +86,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct), ct);
-        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct), ct);
+        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }

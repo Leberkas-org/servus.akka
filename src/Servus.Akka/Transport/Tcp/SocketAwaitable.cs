@@ -4,13 +4,10 @@ using System.Threading.Tasks.Sources;
 
 namespace Servus.Akka.Transport.Tcp;
 
-internal sealed class SocketAwaitable : SocketAsyncEventArgs, IValueTaskSource<int>
+internal sealed class SocketAwaitable()
+    : SocketAsyncEventArgs(unsafeSuppressExecutionContextFlow: true), IValueTaskSource<int>
 {
     private ManualResetValueTaskSourceCore<int> _core;
-
-    public SocketAwaitable() : base(unsafeSuppressExecutionContextFlow: true)
-    {
-    }
 
     public ValueTask<int> ReceiveAsync(Socket socket, Memory<byte> buffer)
     {
@@ -72,6 +69,7 @@ internal sealed class SocketAwaitable : SocketAsyncEventArgs, IValueTaskSource<i
 
     int IValueTaskSource<int>.GetResult(short token) => _core.GetResult(token);
     ValueTaskSourceStatus IValueTaskSource<int>.GetStatus(short token) => _core.GetStatus(token);
+
     void IValueTaskSource<int>.OnCompleted(Action<object?> continuation, object? state, short token,
         ValueTaskSourceOnCompletedFlags flags) => _core.OnCompleted(continuation, state, token, flags);
 }

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
@@ -298,10 +299,6 @@ public sealed class QuicTransportStateMachine(
             buf.Length = length;
             state.SetPendingAdvance(result.Buffer.End);
             ops.OnPushInbound(new MultiplexedData(buf, streamId));
-        }
-        else
-        {
-            state.InputReader?.AdvanceTo(result.Buffer.End);
         }
 
         if (result.IsCompleted || result.IsCanceled)

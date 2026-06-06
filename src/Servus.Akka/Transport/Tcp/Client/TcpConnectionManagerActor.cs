@@ -5,7 +5,7 @@ namespace Servus.Akka.Transport.Tcp.Client;
 
 public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 {
-    internal sealed record Acquire(
+    private sealed record Acquire(
         TransportOptions Options,
         TaskCompletionSource<ConnectionLease> Tcs,
         CancellationToken Token);
@@ -133,12 +133,9 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
         while (host.Pending.TryDequeue(out var pending))
         {
-            if (!pending.Tcs.Task.IsCompleted)
+            if (!pending.Tcs.Task.IsCompleted && pending.Tcs.TrySetResult(msg.Lease))
             {
-                if (pending.Tcs.TrySetResult(msg.Lease))
-                {
-                    return;
-                }
+                return;
             }
         }
 

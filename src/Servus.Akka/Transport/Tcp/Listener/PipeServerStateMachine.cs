@@ -30,7 +30,8 @@ internal sealed class PipeServerStateMachine(
             var baseSecurity = connectionInfo.Security;
             var security = baseSecurity is not null
                 ? baseSecurity with { SslStream = sslStream, AllowDelayedNegotiation = allowDelayedNegotiation }
-                : new SecurityInfo(default, default, SslStream: sslStream, AllowDelayedNegotiation: allowDelayedNegotiation);
+                : new SecurityInfo(default, default, SslStream: sslStream,
+                    AllowDelayedNegotiation: allowDelayedNegotiation);
             ops.OnPushInbound(new TransportConnected(connectionInfo with { Security = security }));
         }
         else
@@ -48,12 +49,14 @@ internal sealed class PipeServerStateMachine(
                 {
                     OnPipeReadComplete(e.Result);
                 }
+
                 break;
             case PipeReadFailed e:
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadFailed(e.Error);
                 }
+
                 break;
         }
     }
@@ -181,7 +184,7 @@ internal sealed class PipeServerStateMachine(
     {
         if (_connection is not null)
         {
-            _ = _connection.DisposeAsync().AsTask();
+            _ = _connection.DisposeAsync();
         }
     }
 }

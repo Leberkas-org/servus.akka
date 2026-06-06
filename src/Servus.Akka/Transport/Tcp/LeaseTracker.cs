@@ -5,7 +5,7 @@ namespace Servus.Akka.Transport.Tcp;
 
 internal sealed class LeaseTracker(int maxOutstanding)
 {
-    private readonly List<PipeSegmentLease> _outstanding = new();
+    private readonly List<PipeSegmentLease> _outstanding = [];
 
     public int Outstanding => _outstanding.Count;
     public bool CanAcquire => _outstanding.Count < maxOutstanding;
@@ -18,10 +18,7 @@ internal sealed class LeaseTracker(int maxOutstanding)
         return lease;
     }
 
-    public void Return(PipeSegmentLease lease)
-    {
-        _outstanding.Remove(lease);
-    }
+    public void Return(PipeSegmentLease lease) => _outstanding.Remove(lease);
 
     public void ForceReturnAll()
     {

@@ -43,12 +43,14 @@ public sealed class PipeTransportStateMachine(
                 {
                     OnPipeReadComplete(e.Result);
                 }
+
                 break;
             case PipeReadFailed e:
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadFailed(e.Error);
                 }
+
                 break;
         }
     }
@@ -63,8 +65,8 @@ public sealed class PipeTransportStateMachine(
             case TransportData data:
                 HandleTransportData(data);
                 break;
-            case DisconnectTransport disconnect:
-                HandleDisconnectTransport(disconnect);
+            case DisconnectTransport:
+                HandleDisconnectTransport();
                 break;
         }
     }
@@ -165,7 +167,7 @@ public sealed class PipeTransportStateMachine(
         ops.OnSignalPullOutbound();
     }
 
-    private void HandleDisconnectTransport(DisconnectTransport disconnect)
+    private void HandleDisconnectTransport()
     {
         CleanupTransport();
         ops.OnSignalPullOutbound();
@@ -316,13 +318,11 @@ public sealed class PipeTransportStateMachine(
         _acquireCts?.Dispose();
         _acquireCts = null;
 
-        if (_currentLease is not null)
-        {
-            _leaseReturned = false;
-            ReturnLeaseToPool(PoolAction.Dispose);
-            _currentLease.Dispose();
-            _currentLease = null;
-        }
+        if (_currentLease is null) return;
+        _leaseReturned = false;
+        ReturnLeaseToPool(PoolAction.Dispose);
+        _currentLease.Dispose();
+        _currentLease = null;
     }
 
     private void FlushPendingWrites()

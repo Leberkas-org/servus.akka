@@ -378,7 +378,7 @@ public sealed class QuicTransportStateMachineSpec
         Assert.Single(ops.PushedInbound);
         Assert.IsType<MultiplexedData>(ops.PushedInbound[0]);
         var pushed = (MultiplexedData)ops.PushedInbound[0];
-        Assert.Equal(streamId, pushed.StreamId);
+        Assert.Equal(new StreamTarget(streamId), pushed.StreamId);
     }
 
     [Fact(Timeout = 5000)]
