@@ -20,6 +20,7 @@ public sealed class TcpConnectionStateMachine(
     private bool _autoReconnect;
 
     private readonly Queue<TransportBuffer> _pendingWrites = new();
+    private bool _needsFlush;
 
     private SequencePosition? _pendingAdvance;
     private bool _readInProgress;
@@ -83,6 +84,7 @@ public sealed class TcpConnectionStateMachine(
         }
         else if (_pendingWrites.Count == 0)
         {
+            FlushIfNeeded();
             _connectionGen++;
             ReturnLeaseToPool(poolingStrategy.OnUpstreamFinish(_currentLease!));
             _currentLease = null;
@@ -127,6 +129,7 @@ public sealed class TcpConnectionStateMachine(
             return;
         }
 
+        FlushIfNeeded();
         _readInProgress = true;
 
         if (_pendingAdvance is { } pos)
@@ -355,6 +358,17 @@ public sealed class TcpConnectionStateMachine(
         data.Memory.Span.CopyTo(mem.Span);
         writer.Advance(data.Length);
         data.Dispose();
-        _ = writer.FlushAsync();
+        _needsFlush = true;
+    }
+
+    private void FlushIfNeeded()
+    {
+        if (!_needsFlush || _currentLease is null)
+        {
+            return;
+        }
+
+        _needsFlush = false;
+        _ = _currentLease.OutputWriter.FlushAsync();
     }
 }
