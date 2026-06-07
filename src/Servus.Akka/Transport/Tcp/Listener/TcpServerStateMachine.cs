@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Security;
+using System.Net.Sockets;
 using Akka.Actor;
 using static Servus.Senf;
 
@@ -12,7 +13,9 @@ internal sealed class TcpServerStateMachine(
     Stream stream,
     ConnectionInfo connectionInfo,
     SslStream? sslStream = null,
-    bool allowDelayedNegotiation = false)
+    bool allowDelayedNegotiation = false,
+    SocketPipeConnectionOptions? pipeOptions = null,
+    Socket? socket = null)
 {
     private SocketPipeConnection? _connection;
     private SequencePosition? _pendingAdvance;
@@ -22,7 +25,9 @@ internal sealed class TcpServerStateMachine(
     public void Start()
     {
         _connectionGen++;
-        _connection = SocketPipeConnection.Create(stream);
+        _connection = socket is not null && sslStream is null
+            ? SocketPipeConnection.Create(socket, pipeOptions)
+            : SocketPipeConnection.Create(stream, pipeOptions);
 
         if (sslStream is not null || allowDelayedNegotiation)
         {
@@ -54,6 +59,13 @@ internal sealed class TcpServerStateMachine(
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadFailed(e.Error);
+                }
+
+                break;
+            case PipeFlushComplete e:
+                if (e.Gen == _connectionGen)
+                {
+                    ops.OnSignalPullOutbound();
                 }
 
                 break;
@@ -126,8 +138,20 @@ internal sealed class TcpServerStateMachine(
         data.Buffer.Memory.Span.CopyTo(mem.Span);
         _connection.OutputWriter.Advance(data.Buffer.Length);
         data.Buffer.Dispose();
-        _ = _connection.OutputWriter.FlushAsync();
-        ops.OnSignalPullOutbound();
+
+        var gen = _connectionGen;
+        var flush = _connection.OutputWriter.FlushAsync();
+
+        if (flush.IsCompleted)
+        {
+            ops.OnSignalPullOutbound();
+        }
+        else
+        {
+            flush.PipeTo(self,
+                success: _ => new PipeFlushComplete(gen),
+                failure: _ => new PipeFlushComplete(gen));
+        }
     }
 
     private void OnPipeReadComplete(ReadResult result)

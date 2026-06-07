@@ -48,6 +48,7 @@ internal sealed class TcpListenerStage
         private readonly TcpListenerStage _stage;
         private readonly TaskCompletionSource<int> _boundSignal;
         private readonly Queue<Flow<ITransportOutbound, ITransportInbound, NotUsed>> _pendingConnections = new();
+        private readonly SocketPipeConnectionOptions _pipeOptions;
         private TcpListener? _listener;
         private IActorRef _self = null!;
         private CancellationTokenSource? _cts;
@@ -56,6 +57,7 @@ internal sealed class TcpListenerStage
         {
             _stage = stage;
             _boundSignal = boundSignal;
+            _pipeOptions = SocketPipeConnectionOptions.FromListener(stage._options);
 
             SetHandler(stage._out, onPull: TryPush);
         }
@@ -189,7 +191,9 @@ internal sealed class TcpListenerStage
                         tlsResult.Stream,
                         connectionInfo,
                         tlsResult.SslStream,
-                        tlsResult.AllowDelayedNegotiation);
+                        tlsResult.AllowDelayedNegotiation,
+                        _pipeOptions,
+                        tlsResult.SslStream is null ? client.Client : null);
 
             var connectionFlow = Flow.FromGraph(connectionStage);
 

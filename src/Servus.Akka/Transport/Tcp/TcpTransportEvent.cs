@@ -11,3 +11,5 @@ internal readonly record struct AcquisitionFailed(Exception Error) : ITcpTranspo
 internal readonly record struct PipeReadComplete(ReadResult Result, int Gen) : ITcpTransportEvent;
 
 internal readonly record struct PipeReadFailed(Exception Error, int Gen) : ITcpTransportEvent;
+
+internal readonly record struct PipeFlushComplete(int Gen) : ITcpTransportEvent;

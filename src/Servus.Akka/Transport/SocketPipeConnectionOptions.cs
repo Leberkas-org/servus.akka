@@ -20,4 +20,15 @@ internal sealed class SocketPipeConnectionOptions
         OutputResumeWriterThreshold = transport.OutputResumeThreshold,
         MinimumSegmentSize = transport.MinimumSegmentSize,
     };
+
+    internal static SocketPipeConnectionOptions FromListener(ListenerOptions listener) => new()
+    {
+        ReceiveBufferHint = listener.ReceiveBufferHint,
+        WaitForData = listener.WaitForData,
+        InputPauseWriterThreshold = listener.InputPauseThreshold,
+        InputResumeWriterThreshold = listener.InputResumeThreshold,
+        OutputPauseWriterThreshold = listener.OutputPauseThreshold,
+        OutputResumeWriterThreshold = listener.OutputResumeThreshold,
+        MinimumSegmentSize = listener.MinimumSegmentSize,
+    };
 }

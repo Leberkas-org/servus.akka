@@ -95,8 +95,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
-        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
+        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct), ct);
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct), ct);
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }
@@ -225,9 +225,16 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     break;
                 }
 
-                foreach (var segment in buffer)
+                if (buffer.IsSingleSegment)
                 {
-                    await sender.SendAsync(socket, segment);
+                    await sender.SendAsync(socket, buffer.First);
+                }
+                else
+                {
+                    foreach (var segment in buffer)
+                    {
+                        await sender.SendAsync(socket, segment);
+                    }
                 }
 
                 reader.AdvanceTo(buffer.End);
@@ -277,9 +284,16 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     break;
                 }
 
-                foreach (var segment in buffer)
+                if (buffer.IsSingleSegment)
                 {
-                    await stream.WriteAsync(segment, ct);
+                    await stream.WriteAsync(buffer.First, ct);
+                }
+                else
+                {
+                    foreach (var segment in buffer)
+                    {
+                        await stream.WriteAsync(segment, ct);
+                    }
                 }
 
                 await stream.FlushAsync(ct);
