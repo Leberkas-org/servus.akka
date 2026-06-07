@@ -61,7 +61,7 @@ public sealed class TcpConnectionStateMachine(
                 if (e.Gen == _connectionGen)
                 {
                     _flushInProgress = false;
-                    ops.OnSignalPullOutbound();
+                    FlushPendingWrites();
                 }
 
                 break;
@@ -91,7 +91,7 @@ public sealed class TcpConnectionStateMachine(
         {
             ops.OnCompleteStage();
         }
-        else if (_pendingWrites.Count == 0)
+        else if (_pendingWrites.Count == 0 && !_flushInProgress)
         {
             FlushIfNeeded();
             _connectionGen++;
@@ -138,7 +138,11 @@ public sealed class TcpConnectionStateMachine(
             return;
         }
 
-        FlushIfNeeded();
+        if (!_flushInProgress)
+        {
+            FlushIfNeeded();
+        }
+
         _readInProgress = true;
 
         if (_pendingAdvance is { } pos)
@@ -173,7 +177,7 @@ public sealed class TcpConnectionStateMachine(
 
     private void HandleTransportData(TransportData data)
     {
-        if (_currentLease is null)
+        if (_currentLease is null || _flushInProgress)
         {
             _pendingWrites.Enqueue(data.Buffer);
             ops.OnSignalPullOutbound();
