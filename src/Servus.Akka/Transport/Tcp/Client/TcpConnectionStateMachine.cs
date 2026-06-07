@@ -21,6 +21,7 @@ public sealed class TcpConnectionStateMachine(
 
     private readonly Queue<TransportBuffer> _pendingWrites = new();
     private bool _needsFlush;
+    private bool _flushInProgress;
 
     private SequencePosition? _pendingAdvance;
     private bool _readInProgress;
@@ -53,6 +54,14 @@ public sealed class TcpConnectionStateMachine(
                 if (e.Gen == _connectionGen)
                 {
                     OnPipeReadFailed(e.Error);
+                }
+
+                break;
+            case PipeFlushComplete e:
+                if (e.Gen == _connectionGen)
+                {
+                    _flushInProgress = false;
+                    ops.OnSignalPullOutbound();
                 }
 
                 break;
@@ -172,7 +181,12 @@ public sealed class TcpConnectionStateMachine(
         }
 
         WriteToOutputPipe(data.Buffer);
-        ops.OnSignalPullOutbound();
+        FlushIfNeeded();
+
+        if (!_flushInProgress)
+        {
+            ops.OnSignalPullOutbound();
+        }
     }
 
     private void HandleDisconnectTransport()
@@ -348,7 +362,12 @@ public sealed class TcpConnectionStateMachine(
             }
         }
 
-        ops.OnSignalPullOutbound();
+        FlushIfNeeded();
+
+        if (!_flushInProgress)
+        {
+            ops.OnSignalPullOutbound();
+        }
     }
 
     private void WriteToOutputPipe(TransportBuffer data)
@@ -369,6 +388,17 @@ public sealed class TcpConnectionStateMachine(
         }
 
         _needsFlush = false;
-        _ = _currentLease.OutputWriter.FlushAsync();
+        var gen = _connectionGen;
+        var flush = _currentLease.OutputWriter.FlushAsync();
+
+        if (flush.IsCompleted)
+        {
+            return;
+        }
+
+        _flushInProgress = true;
+        flush.PipeTo(self,
+            success: _ => new PipeFlushComplete(gen),
+            failure: _ => new PipeFlushComplete(gen));
     }
 }

@@ -95,11 +95,14 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct), ct);
-        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct), ct);
+        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }
+
+    private static bool IsTeardownException(Exception ex) =>
+        ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException;
 
     private static async Task RunSocketReceiveLoop(
         Socket socket,
@@ -135,21 +138,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (IsTeardownException(ex))
         {
-            // noop
-        }
-        catch (SocketException)
-        {
-            // noop
-        }
-        catch (IOException)
-        {
-            // noop
-        }
-        catch (ObjectDisposedException)
-        {
-            // noop
+            _ = ex;
         }
         finally
         {
@@ -184,21 +175,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (IsTeardownException(ex))
         {
-            // noop
-        }
-        catch (SocketException)
-        {
-            // noop
-        }
-        catch (IOException)
-        {
-            // noop
-        }
-        catch (ObjectDisposedException)
-        {
-            // noop
+            _ = ex;
         }
         finally
         {
@@ -245,21 +224,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (IsTeardownException(ex))
         {
-            // noop
-        }
-        catch (SocketException)
-        {
-            // noop
-        }
-        catch (IOException)
-        {
-            // noop
-        }
-        catch (ObjectDisposedException)
-        {
-            // noop
+            _ = ex;
         }
         finally
         {
@@ -305,21 +272,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
             }
         }
-        catch (OperationCanceledException)
+        catch (Exception ex) when (IsTeardownException(ex))
         {
-            // noop
-        }
-        catch (SocketException)
-        {
-            // noop
-        }
-        catch (IOException)
-        {
-            // noop
-        }
-        catch (ObjectDisposedException)
-        {
-            // noop
+            _ = ex;
         }
         finally
         {
@@ -331,21 +286,15 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     {
         await _cts.CancelAsync();
 
-        // Close socket to unblock pending SocketAwaitable operations
-        // (WaitForDataAsync/ReceiveAsync/SendAsync don't accept CancellationToken)
         if (_socket != null)
         {
             try
             {
                 _socket.Shutdown(SocketShutdown.Both);
             }
-            catch (SocketException)
+            catch (Exception ex) when (IsTeardownException(ex))
             {
-                // noop
-            }
-            catch (ObjectDisposedException)
-            {
-                // noop
+                _ = ex;
             }
 
             _socket.Close();
@@ -353,6 +302,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
 
         _inputPipe.Writer.CancelPendingFlush();
         _outputPipe.Reader.CancelPendingRead();
+        await _outputPipe.Writer.CompleteAsync();
 
         await Task.WhenAll(_receiveLoop, _sendLoop);
 
