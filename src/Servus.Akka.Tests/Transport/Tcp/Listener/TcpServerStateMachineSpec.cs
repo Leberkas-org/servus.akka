@@ -165,15 +165,15 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadComplete_with_data_should_push_lease()
+    public async Task Dispatch_PipeReadComplete_with_data_should_push_lease()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
         var pipe = new Pipe();
-        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken).AsTask().Wait(TestContext.Current.CancellationToken);
-        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
+        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
+        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
 
         sm.Dispatch(new PipeReadComplete(readResult, 1));
 
@@ -187,7 +187,7 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadComplete_completed_should_push_disconnected()
+    public async Task Dispatch_PipeReadComplete_completed_should_push_disconnected()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
@@ -195,7 +195,7 @@ public sealed class TcpServerStateMachineSpec
 
         var pipe = new Pipe();
         pipe.Writer.Complete();
-        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
+        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
 
         sm.Dispatch(new PipeReadComplete(readResult, 1));
 
@@ -217,15 +217,15 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadComplete_stale_gen_should_be_ignored()
+    public async Task Dispatch_PipeReadComplete_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
         var pipe = new Pipe();
-        pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken).AsTask().Wait(TestContext.Current.CancellationToken);
-        var readResult = pipe.Reader.ReadAsync(TestContext.Current.CancellationToken).AsTask().Result;
+        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
+        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
 
         sm.Dispatch(new PipeReadComplete(readResult, 999));
 
