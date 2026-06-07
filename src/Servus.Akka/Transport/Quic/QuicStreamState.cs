@@ -1,5 +1,6 @@
 using System.IO.Pipelines;
 using System.Net.Quic;
+using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Quic;
 
@@ -12,7 +13,7 @@ internal enum StreamPhase
     Closed
 }
 
-internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposable
+internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConnectionOptions? pipeOptions = null) : IAsyncDisposable
 {
     private SocketPipeConnection? _connection;
     private Stream? _stream;
@@ -33,7 +34,7 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
     public void AttachConnection(Stream stream)
     {
         _stream = stream;
-        _connection = SocketPipeConnection.Create(stream);
+        _connection = SocketPipeConnection.Create(stream, pipeOptions);
 
         if (_openingBuffer is not null)
         {
@@ -160,9 +161,9 @@ internal sealed class QuicStreamState(StreamDirection direction) : IAsyncDisposa
             {
                 await _drainTask.ConfigureAwait(false);
             }
-            catch
+            catch (Exception ex)
             {
-                // best-effort: drain may fail if connection was already reset
+                Tracing.For("Connection").Debug(this, "drain failed during disposal: {0}", ex.Message);
             }
 
             _drainTask = null;

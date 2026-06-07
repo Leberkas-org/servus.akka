@@ -8,7 +8,8 @@ internal sealed class QuicServerStateMachine(
     IConnectionOperations ops,
     IActorRef self,
     QuicConnectionHandle connectionHandle,
-    ConnectionInfo connectionInfo)
+    ConnectionInfo connectionInfo,
+    SocketPipeConnectionOptions? pipeOptions = null)
 {
     private const string MigrationCheckTimerKey = "migration-check";
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
@@ -113,7 +114,7 @@ internal sealed class QuicServerStateMachine(
 
     private void HandleOpenStream(StreamTarget streamId, StreamDirection direction)
     {
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, pipeOptions);
         _streams[streamId] = state;
 
         var sid = streamId.Value;
@@ -190,7 +191,7 @@ internal sealed class QuicServerStateMachine(
         var direction = (rawStreamId & 0x02) != 0
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, pipeOptions);
         state.AttachConnection(stream);
         _streams[streamId] = state;
 
@@ -201,7 +202,7 @@ internal sealed class QuicServerStateMachine(
     internal void RegisterTestStream(long streamId, StreamDirection direction)
     {
         var target = StreamTarget.FromId(streamId);
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, pipeOptions);
         state.ActivateWithoutConnection();
         _streams[target] = state;
     }

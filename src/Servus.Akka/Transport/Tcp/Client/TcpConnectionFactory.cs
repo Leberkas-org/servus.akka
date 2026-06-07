@@ -44,7 +44,8 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
             protocol,
             security);
 
-        var connection = SocketPipeConnection.Create(stream);
+        var pipeOptions = SocketPipeConnectionOptions.FromTransport(options);
+        var connection = SocketPipeConnection.Create(stream, pipeOptions);
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, info);
 

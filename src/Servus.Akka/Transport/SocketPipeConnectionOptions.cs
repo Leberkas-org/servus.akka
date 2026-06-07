@@ -6,7 +6,18 @@ internal sealed class SocketPipeConnectionOptions
     public long InputResumeWriterThreshold { get; init; } = 512 * 1024;
     public long OutputPauseWriterThreshold { get; init; } = 1024 * 1024;
     public long OutputResumeWriterThreshold { get; init; } = 512 * 1024;
-    public int MinimumSegmentSize { get; init; } = 4 * 1024;
-    public int ReceiveBufferHint { get; init; } = 4 * 1024;
-    public bool WaitForData { get; init; } = true;
+    public int MinimumSegmentSize { get; init; } = 16 * 1024;
+    public int ReceiveBufferHint { get; init; } = 64 * 1024;
+    public bool WaitForData { get; init; }
+
+    internal static SocketPipeConnectionOptions FromTransport(TransportOptions transport) => new()
+    {
+        ReceiveBufferHint = transport.ReceiveBufferHint,
+        WaitForData = transport.WaitForData,
+        InputPauseWriterThreshold = transport.InputPauseThreshold,
+        InputResumeWriterThreshold = transport.InputResumeThreshold,
+        OutputPauseWriterThreshold = transport.OutputPauseThreshold,
+        OutputResumeWriterThreshold = transport.OutputResumeThreshold,
+        MinimumSegmentSize = transport.MinimumSegmentSize,
+    };
 }

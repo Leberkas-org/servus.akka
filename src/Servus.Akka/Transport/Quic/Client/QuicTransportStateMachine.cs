@@ -19,6 +19,7 @@ public sealed class QuicTransportStateMachine(
     private int _connectionGen;
     private ConnectTransport? _pendingConnect;
     private bool _autoReconnect;
+    private SocketPipeConnectionOptions? _pipeOptions;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
@@ -140,6 +141,8 @@ public sealed class QuicTransportStateMachine(
             _autoReconnect = quicOpts.AutoReconnect;
         }
 
+        _pipeOptions = SocketPipeConnectionOptions.FromTransport(connect.Options);
+
         if (_connectionLease is not null)
         {
             _isReconnecting = true;
@@ -159,7 +162,7 @@ public sealed class QuicTransportStateMachine(
             return;
         }
 
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, _pipeOptions);
         _streams[streamId] = state;
 
         var sid = streamId.Value;
@@ -261,7 +264,7 @@ public sealed class QuicTransportStateMachine(
         var direction = (rawStreamId & 0x02) != 0
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, _pipeOptions);
         state.AttachConnection(stream);
         _streams[streamId] = state;
 
@@ -272,7 +275,7 @@ public sealed class QuicTransportStateMachine(
     internal void RegisterTestStream(long streamId, StreamDirection direction)
     {
         var target = StreamTarget.FromId(streamId);
-        var state = new QuicStreamState(direction);
+        var state = new QuicStreamState(direction, _pipeOptions);
         state.ActivateWithoutConnection();
         _streams[target] = state;
     }
