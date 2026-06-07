@@ -143,6 +143,11 @@ internal sealed class QuicListenerStage
                 {
                     return;
                 }
+                catch (QuicException)
+                {
+                    // Transient QUIC errors (handshake failure, connection refused by peer)
+                    // should not kill the listener — continue accepting.
+                }
                 catch (Exception ex)
                 {
                     self.Tell(new QuicAcceptFailed(ex));
