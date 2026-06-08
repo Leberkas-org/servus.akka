@@ -348,24 +348,39 @@ internal sealed class QuicServerStateMachine(
     {
         while (!ct.IsCancellationRequested)
         {
-            var result = await handle.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested)
+            try
             {
-                if (result is not null)
+                var result = await handle.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+
+                if (ct.IsCancellationRequested)
                 {
-                    await result.Value.Stream.DisposeAsync().ConfigureAwait(false);
+                    if (result is not null)
+                    {
+                        await result.Value.Stream.DisposeAsync().ConfigureAwait(false);
+                    }
+
+                    return;
                 }
 
+                if (result is null)
+                {
+                    continue;
+                }
+
+                self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
+            }
+            catch (OperationCanceledException)
+            {
                 return;
             }
-
-            if (result is null)
+            catch (ObjectDisposedException)
             {
-                continue;
+                return;
             }
-
-            self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
+            catch (Exception)
+            {
+                return;
+            }
         }
     }
 

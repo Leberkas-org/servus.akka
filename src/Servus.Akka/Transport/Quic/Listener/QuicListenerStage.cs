@@ -130,7 +130,7 @@ internal sealed class QuicListenerStage
             return await QuicListener.ListenAsync(nativeListenerOptions, ct).ConfigureAwait(false);
         }
 
-        private static async Task AcceptLoopAsync(QuicListener listener, IActorRef self, CancellationToken ct)
+        private async Task AcceptLoopAsync(QuicListener listener, IActorRef self, CancellationToken ct)
         {
             while (!ct.IsCancellationRequested)
             {
@@ -143,10 +143,13 @@ internal sealed class QuicListenerStage
                 {
                     return;
                 }
-                catch (QuicException)
+                catch (QuicException ex)
                 {
-                    // Transient QUIC errors (handshake failure, connection refused by peer)
-                    // should not kill the listener — continue accepting.
+                    Log.Warning("QUIC accept transient error, continuing: {0}", ex.Message);
+                }
+                catch (ObjectDisposedException)
+                {
+                    return;
                 }
                 catch (Exception ex)
                 {
