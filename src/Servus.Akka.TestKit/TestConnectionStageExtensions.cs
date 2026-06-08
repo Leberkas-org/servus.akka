@@ -6,10 +6,10 @@ namespace Servus.Akka.TestKit;
 public static class TestConnectionStageExtensions
 {
     public static void PushData(this TestConnectionStage stage, byte[] data)
-        => stage.PushInbound(new TransportData(data));
+        => stage.PushInbound(TransportData.Rent(data));
 
     public static void PushData(this TestConnectionStage stage, string text)
-        => stage.PushInbound(new TransportData( UTF8.GetBytes(text)));
+        => stage.PushInbound(TransportData.Rent( UTF8.GetBytes(text)));
 
     public static void PushDisconnected(this TestConnectionStage stage,
         DisconnectReason reason = DisconnectReason.Graceful)

@@ -85,7 +85,7 @@ public sealed class TcpServerStateMachineSpec
         var pullBefore = ops.PullOutboundCount;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new TransportData(buffer));
+        sm.HandlePush(TransportData.Rent(buffer));
 
         Assert.True(ops.PullOutboundCount > pullBefore);
     }
@@ -97,7 +97,7 @@ public sealed class TcpServerStateMachineSpec
         var pullBefore = ops.PullOutboundCount;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new TransportData(buffer));
+        sm.HandlePush(TransportData.Rent(buffer));
 
         Assert.True(ops.PullOutboundCount > pullBefore);
     }

@@ -9,7 +9,7 @@ public sealed class ActivityLogSpec
     public void Record_should_add_entry()
     {
         var log = new ActivityLog();
-        var activity = new OutboundReceived(0, new TransportData(new byte[] { 0xAA }));
+        var activity = new OutboundReceived(0, TransportData.Rent(new byte[] { 0xAA }));
 
         log.Record(activity);
 
@@ -21,13 +21,13 @@ public sealed class ActivityLogSpec
     public void OfType_should_filter_by_type()
     {
         var log = new ActivityLog();
-        var outbound = new OutboundReceived(0, new TransportData(new byte[] { 0xAA }));
+        var outbound = new OutboundReceived(0, TransportData.Rent(new byte[] { 0xAA }));
         var connectionInfo = new ConnectionInfo(
             new IPEndPoint(IPAddress.Loopback, 1000),
             new IPEndPoint(IPAddress.Loopback, 2000),
             TransportProtocol.Tcp);
         var inbound = new InboundPushed(0, new TransportConnected(connectionInfo));
-        var handler = new HandlerInvoked("TestHandler", new TransportData(new byte[] { 0xBB }));
+        var handler = new HandlerInvoked("TestHandler", TransportData.Rent(new byte[] { 0xBB }));
 
         log.Record(outbound);
         log.Record(inbound);
@@ -51,7 +51,7 @@ public sealed class ActivityLogSpec
     public void Clear_should_remove_all_entries()
     {
         var log = new ActivityLog();
-        log.Record(new OutboundReceived(0, new TransportData(new byte[] { 0xAA })));
+        log.Record(new OutboundReceived(0, TransportData.Rent(new byte[] { 0xAA })));
         var connectionInfo = new ConnectionInfo(
             new IPEndPoint(IPAddress.Loopback, 1000),
             new IPEndPoint(IPAddress.Loopback, 2000),
@@ -79,7 +79,7 @@ public sealed class ActivityLogSpec
     [Fact(Timeout = 5000)]
     public void Activity_Timestamp_should_be_utc()
     {
-        var activity = new OutboundReceived(0, new TransportData(new byte[] { 0xAA }));
+        var activity = new OutboundReceived(0, TransportData.Rent(new byte[] { 0xAA }));
 
         Assert.Equal(DateTimeOffset.UtcNow.Offset, activity.Timestamp.Offset);
     }

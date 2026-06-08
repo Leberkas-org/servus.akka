@@ -56,7 +56,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
             .AutoConnect()
             .Build();
 
-        stage.PushOnce(new TransportData("HTTP/1.1 200 OK\r\n\r\n"u8.ToArray()));
+        stage.PushOnce(TransportData.Rent("HTTP/1.1 200 OK\r\n\r\n"u8.ToArray()));
 
         var results = new List<ITransportInbound>();
         var tcs = new TaskCompletionSource();
@@ -90,7 +90,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 1, 2, 3 })
+                TransportData.Rent(new byte[] { 1, 2, 3 })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>
@@ -108,7 +108,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
         var dataOut = await stage.WaitForOutbound(ct);
         Assert.IsType<TransportData>(dataOut);
 
-        stage.PushInbound(new TransportData(new byte[] { 4, 5, 6 }));
+        stage.PushInbound(TransportData.Rent(new byte[] { 4, 5, 6 }));
         stage.PushInbound(new TransportDisconnected(DisconnectReason.Graceful));
 
         await tcs.Task.WaitAsync(ct);
@@ -146,7 +146,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
             .AutoConnect()
             .OnOutbound<TransportData>((_, ctx) =>
             {
-                ctx.Push(new TransportData(new byte[] { 0xFF }));
+                ctx.Push(TransportData.Rent(new byte[] { 0xFF }));
             })
             .Build();
 
@@ -155,7 +155,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 1, 2, 3 })
+                TransportData.Rent(new byte[] { 1, 2, 3 })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>
@@ -202,7 +202,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
             .Build();
 
         stage.PushResponse(outbound => outbound is TransportData
-            ? new TransportData(new byte[] { 0xAA })
+            ? TransportData.Rent(new byte[] { 0xAA })
             : null);
 
         var results = new List<ITransportInbound>();
@@ -210,7 +210,7 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 1, 2, 3 })
+                TransportData.Rent(new byte[] { 1, 2, 3 })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>
@@ -236,15 +236,15 @@ public sealed class TestConnectionStageSpec : global::Akka.TestKit.Xunit.TestKit
             .AutoConnect()
             .Build();
 
-        stage.PushResponseOnce(_ => new TransportData(new byte[] { 0xBB }));
+        stage.PushResponseOnce(_ => TransportData.Rent(new byte[] { 0xBB }));
 
         var results = new List<ITransportInbound>();
         var tcs = new TaskCompletionSource();
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 1 }),
-                new TransportData(new byte[] { 2 })
+                TransportData.Rent(new byte[] { 1 }),
+                TransportData.Rent(new byte[] { 2 })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>

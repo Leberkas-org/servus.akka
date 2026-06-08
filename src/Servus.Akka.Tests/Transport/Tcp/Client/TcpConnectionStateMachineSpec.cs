@@ -109,7 +109,7 @@ public sealed class TcpConnectionStateMachineSpec
 
         var buffer = CreateTestBuffer(7, 8, 9);
         var pullBefore = ops.PullOutboundCount;
-        sm.HandlePush(new TransportData(buffer));
+        sm.HandlePush(TransportData.Rent(buffer));
 
         Assert.True(ops.PullOutboundCount > pullBefore);
     }
@@ -123,7 +123,7 @@ public sealed class TcpConnectionStateMachineSpec
         var pullBefore = ops.PullOutboundCount;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new TransportData(buffer));
+        sm.HandlePush(TransportData.Rent(buffer));
 
         Assert.True(ops.PullOutboundCount > pullBefore);
     }
@@ -184,8 +184,8 @@ public sealed class TcpConnectionStateMachineSpec
         sm.HandlePush(new ConnectTransport(TestOptions));
         var buf1 = CreateTestBuffer(1, 2);
         var buf2 = CreateTestBuffer(3, 4);
-        sm.HandlePush(new TransportData(buf1));
-        sm.HandlePush(new TransportData(buf2));
+        sm.HandlePush(TransportData.Rent(buf1));
+        sm.HandlePush(TransportData.Rent(buf2));
 
         sm.PostStop();
 
@@ -212,7 +212,7 @@ public sealed class TcpConnectionStateMachineSpec
         sm.HandlePush(new ConnectTransport(TestOptions));
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new TransportData(buffer));
+        sm.HandlePush(TransportData.Rent(buffer));
 
         var lease = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease));

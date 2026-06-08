@@ -14,6 +14,31 @@ public sealed record CompleteWrites(StreamTarget StreamId) : ITransportOutbound;
 
 public sealed record ResetStream(StreamTarget StreamId, long ErrorCode = 0) : ITransportOutbound;
 
-public sealed record TransportData(TransportBuffer Buffer) : ITransportOutbound, ITransportInbound;
+public sealed class TransportData : ITransportOutbound, ITransportInbound
+{
+    private static readonly System.Collections.Concurrent.ConcurrentStack<TransportData> Pool = new();
+
+    public TransportBuffer Buffer { get; private set; } = null!;
+
+    public static TransportData Rent(TransportBuffer buffer)
+    {
+        if (!Pool.TryPop(out var item))
+        {
+            item = new TransportData();
+        }
+
+        item.Buffer = buffer;
+        return item;
+    }
+
+    public void Return()
+    {
+        Buffer = null!;
+        if (Pool.Count < 256)
+        {
+            Pool.Push(this);
+        }
+    }
+}
 
 public sealed record MultiplexedData(TransportBuffer Buffer, StreamTarget StreamId) : ITransportOutbound, ITransportInbound;

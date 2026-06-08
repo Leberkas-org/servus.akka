@@ -227,7 +227,7 @@ public sealed class TestConnectionStageExtensionsSpec : global::Akka.TestKit.Xun
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 0xAA })
+                TransportData.Rent(new byte[] { 0xAA })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.Ignore<ITransportInbound>().MapMaterializedValue(_ => NotUsed.Instance), _materializer);

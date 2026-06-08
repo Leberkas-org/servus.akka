@@ -27,13 +27,13 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
             .OnData((_, ctx) =>
             {
                 handlerInvoked = true;
-                ctx.Push(new TransportData(new byte[] { 0xFF }));
+                ctx.Push(TransportData.Rent(new byte[] { 0xFF }));
             })
             .Build();
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new TransportData(new byte[] { 0xAA })
+                TransportData.Rent(new byte[] { 0xAA })
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>

@@ -249,7 +249,7 @@ public sealed class TcpConnectionStateMachine(
             result.Buffer.CopyTo(buf.FullMemory.Span);
             buf.Length = length;
             _pendingAdvance = result.Buffer.End;
-            ops.OnPushInbound(new TransportData(buf));
+            ops.OnPushInbound(TransportData.Rent(buf));
         }
 
         if (result.IsCompleted || result.IsCanceled)
