@@ -17,4 +17,6 @@ internal readonly record struct PipeStreamReadFailed(Exception Error, long Strea
 
 internal readonly record struct InboundStreamAccepted(Stream Stream, long StreamId) : IQuicTransportEvent;
 
+internal readonly record struct InboundStreamBatch(List<(Stream Stream, long StreamId)> Streams) : IQuicTransportEvent;
+
 internal readonly record struct MigrationDetected(EndPoint OldEndPoint, EndPoint NewEndPoint) : IQuicTransportEvent;
