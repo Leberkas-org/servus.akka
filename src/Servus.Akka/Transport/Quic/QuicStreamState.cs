@@ -175,6 +175,18 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
             _connection = null;
         }
 
-        _stream = null;
+        if (_stream is not null)
+        {
+            try
+            {
+                await _stream.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                Tracing.For("Connection").Debug(this, "stream disposal failed: {0}", ex.Message);
+            }
+
+            _stream = null;
+        }
     }
 }

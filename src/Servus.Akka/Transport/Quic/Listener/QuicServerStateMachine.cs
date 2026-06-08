@@ -21,6 +21,8 @@ internal sealed class QuicServerStateMachine(
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
 
+    internal int ActiveStreamCount => _streams.Count;
+
     public void Start()
     {
         _connectionGen++;
