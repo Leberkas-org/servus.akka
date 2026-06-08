@@ -55,13 +55,6 @@ internal sealed class QuicServerStateMachine(
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
                 break;
-            case InboundStreamBatch e:
-                foreach (var (stream, streamId) in e.Streams)
-                {
-                    OnInboundStreamAccepted(stream, streamId);
-                }
-
-                break;
             case StreamLeaseAcquired e:
                 OnStreamLeaseAcquired(e.Stream, e.StreamId);
                 break;
@@ -376,17 +369,7 @@ internal sealed class QuicServerStateMachine(
                     continue;
                 }
 
-                var batch = new List<(Stream, long)>(4) { (result.Value.Stream, result.Value.StreamId) };
-                await DrainPendingStreams(handle, batch, ct).ConfigureAwait(false);
-
-                if (batch.Count == 1)
-                {
-                    self.Tell(new InboundStreamAccepted(batch[0].Item1, batch[0].Item2));
-                }
-                else
-                {
-                    self.Tell(new InboundStreamBatch(batch));
-                }
+                self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
             }
             catch (OperationCanceledException)
             {
@@ -399,31 +382,6 @@ internal sealed class QuicServerStateMachine(
             catch (Exception)
             {
                 return;
-            }
-        }
-    }
-
-    private static async Task DrainPendingStreams(
-        QuicConnectionHandle handle, List<(Stream, long)> batch, CancellationToken ct)
-    {
-        const int maxBatch = 16;
-        while (batch.Count < maxBatch)
-        {
-            try
-            {
-                using var probe = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                probe.CancelAfter(0);
-                var next = await handle.AcceptInboundStreamAsync(probe.Token).ConfigureAwait(false);
-                if (next is null)
-                {
-                    break;
-                }
-
-                batch.Add((next.Value.Stream, next.Value.StreamId));
-            }
-            catch (OperationCanceledException)
-            {
-                break;
             }
         }
     }
