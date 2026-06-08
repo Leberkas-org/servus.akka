@@ -125,6 +125,50 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
                 await msg.Lease.DisposeAsync();
             }
         }
+
+        DrainPending();
+    }
+
+    private void DrainPending()
+    {
+        foreach (var host in _hosts.Values)
+        {
+            while (host.Pending.Count > 0)
+            {
+                var found = false;
+                foreach (var lease in host.Leases)
+                {
+                    if (!lease.CanAcceptStream() || !lease.IsAlive())
+                    {
+                        continue;
+                    }
+
+                    if (!host.Pending.TryDequeue(out var pending))
+                    {
+                        break;
+                    }
+
+                    if (pending.Tcs.Task.IsCompleted)
+                    {
+                        continue;
+                    }
+
+                    lease.MarkBusy();
+                    if (!pending.Tcs.TrySetResult(lease))
+                    {
+                        lease.MarkIdle();
+                    }
+
+                    found = true;
+                    break;
+                }
+
+                if (!found)
+                {
+                    break;
+                }
+            }
+        }
     }
 
     private async Task OnEstablished(Established msg)
@@ -139,6 +183,8 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
         {
             await OnRelease(new Release(msg.Lease, CanReuse: true));
         }
+
+        DrainPending();
     }
 
     private void OnFailed(EstablishFailed msg)

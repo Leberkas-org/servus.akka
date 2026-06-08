@@ -314,4 +314,58 @@ public sealed class QuicConnectionManagerActorSpec : TestKit
 
         await lease2.DisposeAsync();
     }
+
+    [Fact(Timeout = 5000)]
+    public async Task Release_should_dispatch_pending_acquire_when_stream_becomes_available()
+    {
+        var factory = new MockFactory(maxStreams: 1);
+        var actor = CreateActor(factory);
+        var options = CreateOptions() with { MaxBidirectionalStreams = 1, MaxConnectionsPerHost = 1 };
+
+        var lease1 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        var acquire2Task = QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+        Assert.False(acquire2Task.IsCompleted);
+
+        actor.Tell(new QuicConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        var lease2 = await acquire2Task.WaitAsync(TimeSpan.FromSeconds(3),
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lease2);
+        Assert.Same(lease1, lease2);
+        Assert.Equal(1, factory.EstablishCount);
+
+        await lease2.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Established_should_dispatch_pending_acquires_on_new_connection()
+    {
+        var factory = new MockFactory(maxStreams: 2);
+        var actor = CreateActor(factory);
+        var options = CreateOptions() with { MaxBidirectionalStreams = 2, MaxConnectionsPerHost = 2 };
+
+        var lease1 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        var lease2 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        var acquire3Task = QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        var lease3 = await acquire3Task.WaitAsync(TimeSpan.FromSeconds(3),
+            TestContext.Current.CancellationToken);
+
+        Assert.NotNull(lease3);
+        Assert.Equal(2, factory.EstablishCount);
+
+        await lease1.DisposeAsync();
+        await lease2.DisposeAsync();
+        await lease3.DisposeAsync();
+    }
 }
