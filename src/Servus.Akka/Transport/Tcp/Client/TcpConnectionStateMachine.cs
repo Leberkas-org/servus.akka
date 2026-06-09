@@ -184,7 +184,12 @@ public sealed class TcpConnectionStateMachine(
             return;
         }
 
-        WriteToOutputPipe(data.Buffer);
+        if (!WriteToOutputPipe(data.Buffer))
+        {
+            OnInboundComplete(DisconnectReason.Error);
+            return;
+        }
+
         FlushIfNeeded();
 
         if (!_flushInProgress)
@@ -358,7 +363,11 @@ public sealed class TcpConnectionStateMachine(
         {
             if (_currentLease is not null)
             {
-                WriteToOutputPipe(buffer);
+                if (!WriteToOutputPipe(buffer))
+                {
+                    OnInboundComplete(DisconnectReason.Error);
+                    return;
+                }
             }
             else
             {
@@ -374,14 +383,23 @@ public sealed class TcpConnectionStateMachine(
         }
     }
 
-    private void WriteToOutputPipe(TransportBuffer data)
+    private bool WriteToOutputPipe(TransportBuffer data)
     {
-        var writer = _currentLease!.OutputWriter;
-        var mem = writer.GetMemory(data.Length);
-        data.Memory.Span.CopyTo(mem.Span);
-        writer.Advance(data.Length);
-        data.Dispose();
-        _needsFlush = true;
+        try
+        {
+            var writer = _currentLease!.OutputWriter;
+            var mem = writer.GetMemory(data.Length);
+            data.Memory.Span.CopyTo(mem.Span);
+            writer.Advance(data.Length);
+            data.Dispose();
+            _needsFlush = true;
+            return true;
+        }
+        catch (InvalidOperationException)
+        {
+            data.Dispose();
+            return false;
+        }
     }
 
     private void FlushIfNeeded()
@@ -393,7 +411,16 @@ public sealed class TcpConnectionStateMachine(
 
         _needsFlush = false;
         var gen = _connectionGen;
-        var flush = _currentLease.OutputWriter.FlushAsync();
+
+        ValueTask<FlushResult> flush;
+        try
+        {
+            flush = _currentLease.OutputWriter.FlushAsync();
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
 
         if (flush.IsCompleted)
         {
