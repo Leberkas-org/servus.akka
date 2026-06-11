@@ -10,8 +10,7 @@
         <PackageReference Include="Microsoft.Extensions.DependencyInjection"/>
         <PackageReference Include="Servus"/>
         <None Include="../../README.md" Pack="true" Visible="false" PackagePath="\"/>
-        <None Include="../../docs/public/logo.png" Pack="true" Visible="false" PackagePath="\"/>
-        <None Include="../../LICENSE" Pack="true" Visible="false" PackagePath="\"/>
+<None Include="../../LICENSE" Pack="true" Visible="false" PackagePath="\"/>
     </ItemGroup>
 
     <Target Name="ServusLogo" BeforeTargets="Build">
