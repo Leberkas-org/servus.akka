@@ -168,4 +168,40 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
 
         await connection.DisposeAsync();
     }
+
+    [Fact(Timeout = 15000)]
+    public async Task DisposeAsync_immediately_after_create_should_not_throw()
+    {
+        // Regression: the socket receive/send loops must not be scheduled via Task.Run(f, ct).
+        // Disposing before the thread pool starts a loop delegate would otherwise cancel it
+        // before its body runs, skipping the teardown catch/finally, and DisposeAsync's
+        // Task.WhenAll would surface a TaskCanceledException. Immediate dispose maximises that
+        // scheduling window; repeat to exercise the race. Post-fix this always completes cleanly.
+        for (var i = 0; i < 50; i++)
+        {
+            var (client, server) = await CreateConnectedPairAsync(TestContext.Current.CancellationToken);
+            try
+            {
+                var connection = SocketPipeConnection.Create(client);
+                await connection.DisposeAsync();
+            }
+            finally
+            {
+                server.Dispose();
+            }
+        }
+    }
+
+    private static async Task<(Socket Client, Socket Server)> CreateConnectedPairAsync(CancellationToken ct)
+    {
+        using var listener = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        listener.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+        listener.Listen(1);
+
+        var endpoint = (IPEndPoint)listener.LocalEndPoint!;
+        var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+        await client.ConnectAsync(endpoint, ct);
+        var server = await listener.AcceptAsync(ct);
+        return (client, server);
+    }
 }

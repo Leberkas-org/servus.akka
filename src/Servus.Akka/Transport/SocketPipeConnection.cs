@@ -68,8 +68,13 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunSocketReceiveLoop(socket, inputPipe.Writer, opts, ct), ct);
-        var sendLoop = Task.Run(() => RunSocketSendLoop(socket, outputPipe.Reader, ct), ct);
+        // Do NOT pass `ct` as the second argument to Task.Run: if DisposeAsync cancels the token
+        // before the thread pool starts the delegate, Task.Run(f, ct) cancels the task without ever
+        // running the body, so the loop's teardown catch + finally never run and DisposeAsync's
+        // Task.WhenAll surfaces a TaskCanceledException. The loops already observe `ct` internally
+        // and shut down cleanly; the stream overload below relies on the same contract.
+        var receiveLoop = Task.Run(() => RunSocketReceiveLoop(socket, inputPipe.Writer, opts, ct));
+        var sendLoop = Task.Run(() => RunSocketSendLoop(socket, outputPipe.Reader, ct));
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts, socket);
     }
