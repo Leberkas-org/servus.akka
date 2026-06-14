@@ -78,20 +78,33 @@ internal sealed class QuicListenerStage
             _cts?.Dispose();
             _cts = null;
 
-            if (_listener is not null)
+            var listener = _listener;
+            _listener = null;
+            if (listener is not null)
             {
-                var disposeTask = _listener.DisposeAsync();
-                if (!disposeTask.IsCompleted)
-                {
-                    disposeTask.AsTask().Wait(TimeSpan.FromSeconds(10));
-                }
-
-                _listener = null;
+                // QuicListener is IAsyncDisposable-only. Dispose it on a detached task so PostStop
+                // never blocks the materializer thread (the previous .Wait(10s) was a sync-over-async
+                // stall). _cts is already cancelled above, so the accept loop has stopped; the awaited
+                // DisposeAsync still runs to completion, releasing the UDP socket (no fire-and-forget leak).
+                _ = DisposeListenerAsync(listener, Log);
             }
 
             while (_pendingConnections.TryDequeue(out _))
             {
                 // noop
+            }
+        }
+
+        private static async Task DisposeListenerAsync(QuicListener listener, ILoggingAdapter log)
+        {
+            try
+            {
+                await listener.DisposeAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Disposal failure during teardown is non-fatal; the connection is going away anyway.
+                log.Warning("QUIC listener disposal during teardown failed: {0}", ex.Message);
             }
         }
 
