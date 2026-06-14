@@ -135,7 +135,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
 
                 writer.Advance(bytesRead);
-                var flush = await writer.FlushAsync(ct);
+                // Guarded sync fast-path: read .Result only when the flush already completed (the
+                // common case while the reader keeps up), skipping the awaiter dance. Never blocks.
+                var flushTask = writer.FlushAsync(ct);
+                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
 
                 if (flush.IsCompleted || flush.IsCanceled)
                 {
@@ -172,7 +175,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
 
                 writer.Advance(bytesRead);
-                var flush = await writer.FlushAsync(ct);
+                // Guarded sync fast-path: read .Result only when the flush already completed (the
+                // common case while the reader keeps up), skipping the awaiter dance. Never blocks.
+                var flushTask = writer.FlushAsync(ct);
+                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
 
                 if (flush.IsCompleted || flush.IsCanceled)
                 {
@@ -201,7 +207,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         {
             while (!ct.IsCancellationRequested)
             {
-                var result = await reader.ReadAsync(ct);
+                // Guarded sync fast-path: the output pipe usually already has buffered bytes, so the
+                // read completes synchronously; read .Result without the awaiter dance. Never blocks.
+                var readTask = reader.ReadAsync(ct);
+                var result = readTask.IsCompletedSuccessfully ? readTask.Result : await readTask;
                 var buffer = result.Buffer;
 
                 if (buffer.IsEmpty && result.IsCompleted)
@@ -248,7 +257,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         {
             while (!ct.IsCancellationRequested)
             {
-                var result = await reader.ReadAsync(ct);
+                // Guarded sync fast-path: the output pipe usually already has buffered bytes, so the
+                // read completes synchronously; read .Result without the awaiter dance. Never blocks.
+                var readTask = reader.ReadAsync(ct);
+                var result = readTask.IsCompletedSuccessfully ? readTask.Result : await readTask;
                 var buffer = result.Buffer;
 
                 if (buffer.IsEmpty && result.IsCompleted)
