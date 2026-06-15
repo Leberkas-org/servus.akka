@@ -51,8 +51,16 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     {
         var opts = options ?? new SocketPipeConnectionOptions();
 
+        // One batched IOQueue shard per connection drives both transport-side schedulers (the input
+        // writer = receive loop, the output reader = send loop); the application side stays on the
+        // ThreadPool. This caps scheduler fan-out and batches socket wakeups instead of paying one
+        // ThreadPool item per pipe continuation.
+        var ioQueue = IOQueue.GetNext();
+
         var inputPipe = new Pipe(new PipeOptions(
             pool: MemoryPool<byte>.Shared,
+            readerScheduler: PipeScheduler.ThreadPool,
+            writerScheduler: ioQueue,
             minimumSegmentSize: opts.MinimumSegmentSize,
             pauseWriterThreshold: opts.InputPauseWriterThreshold,
             resumeWriterThreshold: opts.InputResumeWriterThreshold,
@@ -60,6 +68,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
 
         var outputPipe = new Pipe(new PipeOptions(
             pool: MemoryPool<byte>.Shared,
+            readerScheduler: ioQueue,
+            writerScheduler: PipeScheduler.ThreadPool,
             minimumSegmentSize: opts.MinimumSegmentSize,
             pauseWriterThreshold: opts.OutputPauseWriterThreshold,
             resumeWriterThreshold: opts.OutputResumeWriterThreshold,
@@ -83,8 +93,14 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     {
         var opts = options ?? new SocketPipeConnectionOptions();
 
+        // Same batched-scheduler model as the socket path (see Create(Socket)): the stream read/write
+        // loops are the transport side and run on a per-connection IOQueue shard.
+        var ioQueue = IOQueue.GetNext();
+
         var inputPipe = new Pipe(new PipeOptions(
             pool: MemoryPool<byte>.Shared,
+            readerScheduler: PipeScheduler.ThreadPool,
+            writerScheduler: ioQueue,
             minimumSegmentSize: opts.MinimumSegmentSize,
             pauseWriterThreshold: opts.InputPauseWriterThreshold,
             resumeWriterThreshold: opts.InputResumeWriterThreshold,
@@ -92,6 +108,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
 
         var outputPipe = new Pipe(new PipeOptions(
             pool: MemoryPool<byte>.Shared,
+            readerScheduler: ioQueue,
+            writerScheduler: PipeScheduler.ThreadPool,
             minimumSegmentSize: opts.MinimumSegmentSize,
             pauseWriterThreshold: opts.OutputPauseWriterThreshold,
             resumeWriterThreshold: opts.OutputResumeWriterThreshold,
@@ -218,17 +236,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     break;
                 }
 
-                if (buffer.IsSingleSegment)
-                {
-                    await sender.SendAsync(socket, buffer.First);
-                }
-                else
-                {
-                    foreach (var segment in buffer)
-                    {
-                        await sender.SendAsync(socket, segment);
-                    }
-                }
+                // Multi-segment buffers (accumulated/pipelined writes) leave in a single vectored
+                // socket send instead of one syscall per segment.
+                await sender.SendAsync(socket, buffer);
 
                 reader.AdvanceTo(buffer.End);
 

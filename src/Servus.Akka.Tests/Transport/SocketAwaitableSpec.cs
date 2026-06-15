@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using Servus.Akka.Transport;
@@ -96,5 +97,107 @@ public sealed class SocketAwaitableSpec : IAsyncLifetime
         await _server.SendAsync("two"u8.ToArray(), SocketFlags.None);
         var second = await awaitable.ReceiveAsync(_client, buffer);
         Assert.Equal("two", System.Text.Encoding.UTF8.GetString(buffer, 0, second));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task SendAsync_should_send_multi_segment_sequence_in_order()
+    {
+        var awaitable = new SocketAwaitable();
+        var sequence = CreateMultiSegment("foo"u8.ToArray(), "bar"u8.ToArray(), "baz"u8.ToArray());
+
+        var bytesSent = await awaitable.SendAsync(_client, sequence);
+
+        Assert.Equal(9, bytesSent);
+
+        var buffer = new byte[1024];
+        var total = await ReadExactlyAsync(_server, buffer, 9);
+        Assert.Equal("foobarbaz", System.Text.Encoding.UTF8.GetString(buffer, 0, total));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task SendAsync_should_be_reusable_across_single_and_multi_segment()
+    {
+        var awaitable = new SocketAwaitable();
+        var buffer = new byte[1024];
+
+        // Single-buffer send.
+        await awaitable.SendAsync(_client, "one"u8.ToArray());
+        var n1 = await ReadExactlyAsync(_server, buffer, 3);
+        Assert.Equal("one", System.Text.Encoding.UTF8.GetString(buffer, 0, n1));
+
+        // Switch to gather send (must clear the single Buffer before setting BufferList).
+        await awaitable.SendAsync(_client, CreateMultiSegment("tw"u8.ToArray(), "oo"u8.ToArray()));
+        var n2 = await ReadExactlyAsync(_server, buffer, 4);
+        Assert.Equal("twoo", System.Text.Encoding.UTF8.GetString(buffer, 0, n2));
+
+        // Switch back to single (must clear the BufferList before setting Buffer).
+        await awaitable.SendAsync(_client, "end"u8.ToArray());
+        var n3 = await ReadExactlyAsync(_server, buffer, 3);
+        Assert.Equal("end", System.Text.Encoding.UTF8.GetString(buffer, 0, n3));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task SendAsync_should_fall_through_to_single_buffer_for_one_segment_sequence()
+    {
+        var awaitable = new SocketAwaitable();
+        var sequence = new ReadOnlySequence<byte>("solo"u8.ToArray());
+
+        var bytesSent = await awaitable.SendAsync(_client, sequence);
+
+        Assert.Equal(4, bytesSent);
+
+        var buffer = new byte[1024];
+        var total = await ReadExactlyAsync(_server, buffer, 4);
+        Assert.Equal("solo", System.Text.Encoding.UTF8.GetString(buffer, 0, total));
+    }
+
+    private static async Task<int> ReadExactlyAsync(Socket socket, byte[] buffer, int count)
+    {
+        var total = 0;
+        while (total < count)
+        {
+            var read = await socket.ReceiveAsync(buffer.AsMemory(total), SocketFlags.None);
+            if (read == 0)
+            {
+                break;
+            }
+
+            total += read;
+        }
+
+        return total;
+    }
+
+    private static ReadOnlySequence<byte> CreateMultiSegment(params byte[][] chunks)
+    {
+        Segment? first = null;
+        Segment? last = null;
+
+        foreach (var chunk in chunks)
+        {
+            if (first is null)
+            {
+                first = new Segment(chunk);
+                last = first;
+            }
+            else
+            {
+                last = last!.Append(chunk);
+            }
+        }
+
+        return new ReadOnlySequence<byte>(first!, 0, last!, last!.Memory.Length);
+    }
+
+    private sealed class Segment : ReadOnlySequenceSegment<byte>
+    {
+        public Segment(ReadOnlyMemory<byte> memory) => Memory = memory;
+
+        public Segment Append(ReadOnlyMemory<byte> memory)
+        {
+            var next = new Segment(memory) { RunningIndex = RunningIndex + Memory.Length };
+            Next = next;
+            return next;
+        }
     }
 }
