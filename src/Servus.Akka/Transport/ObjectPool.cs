@@ -1,6 +1,6 @@
 namespace Servus.Akka.Transport;
 
-internal sealed class ObjectPool<T> where T : class
+public sealed class ObjectPool<T> where T : class
 {
     private T? _fastItem;
     private readonly T?[] _items;
@@ -34,11 +34,11 @@ internal sealed class ObjectPool<T> where T : class
         return false;
     }
 
-    public void Return(T item)
+    public bool TryReturn(T item)
     {
         if (Interlocked.CompareExchange(ref _fastItem, item, null) is null)
         {
-            return;
+            return true;
         }
 
         var items = _items;
@@ -46,8 +46,12 @@ internal sealed class ObjectPool<T> where T : class
         {
             if (Interlocked.CompareExchange(ref items[i], item, null) is null)
             {
-                return;
+                return true;
             }
         }
+
+        return false;
     }
+
+    public void Return(T item) => TryReturn(item);
 }
