@@ -132,8 +132,10 @@ internal class TcpClientProvider(TcpTransportOptions options) : IAsyncDisposable
     {
         var result = new Socket(SocketType.Stream, ProtocolType.Tcp)
         {
+            // Graceful close (FIN), not an abortive RST. An HTTP keep-alive / pooled connection must
+            // flush in-flight bytes and let the peer observe a clean shutdown; SO_LINGER(true, 0) would
+            // reset on every close, risk truncating the final bytes, and pollute the server with RSTs.
             NoDelay = true,
-            LingerState = new LingerOption(true, 0),
         };
 
         result.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
