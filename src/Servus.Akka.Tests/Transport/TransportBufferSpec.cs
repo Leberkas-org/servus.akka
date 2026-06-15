@@ -197,6 +197,57 @@ public sealed class TransportBufferSpec
         buf.Dispose();
     }
 
+    [Fact(Timeout = 5000)]
+    public void Wrap_with_offset_should_expose_sliced_range()
+    {
+        var owner = new TrackingMemoryOwner(64);
+        owner.Memory.Span[10] = 0x11;
+        owner.Memory.Span[11] = 0x22;
+        owner.Memory.Span[12] = 0x33;
+
+        var buf = TransportBuffer.Wrap(owner, 10, 3);
+
+        Assert.Equal(3, buf.Length);
+        Assert.Equal(3, buf.Memory.Length);
+        Assert.Equal(3, buf.Span.Length);
+        Assert.Equal(0x11, buf.Span[0]);
+        Assert.Equal(0x22, buf.Span[1]);
+        Assert.Equal(0x33, buf.Span[2]);
+
+        buf.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_with_offset_should_dispose_wrapped_owner_on_dispose()
+    {
+        var owner = new TrackingMemoryOwner(32);
+        var buf = TransportBuffer.Wrap(owner, 4, 8);
+
+        Assert.False(owner.Disposed);
+
+        buf.Dispose();
+
+        Assert.True(owner.Disposed);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_with_offset_should_not_leak_offset_into_reused_buffer()
+    {
+        var first = TransportBuffer.Wrap(new TrackingMemoryOwner(64), 16, 8);
+        first.Dispose();
+
+        // The same instance is recycled; a plain Rent must start at offset 0 so Memory
+        // covers [0..Length], not the previous sliced range.
+        var reused = TransportBuffer.Rent(64);
+        Assert.Same(first, reused);
+        reused.Length = 64;
+
+        Assert.Equal(64, reused.Memory.Length);
+        Assert.True(reused.FullMemory.Length >= 64);
+
+        reused.Dispose();
+    }
+
     private sealed class TrackingMemoryOwner(int size) : IMemoryOwner<byte>
     {
         private readonly byte[] _array = new byte[size];
