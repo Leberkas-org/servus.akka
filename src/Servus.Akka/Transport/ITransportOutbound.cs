@@ -16,13 +16,13 @@ public sealed record ResetStream(StreamTarget StreamId, long ErrorCode = 0) : IT
 
 public sealed class TransportData : ITransportOutbound, ITransportInbound
 {
-    private static readonly System.Collections.Concurrent.ConcurrentStack<TransportData> Pool = new();
+    private static readonly ObjectPool<TransportData> Pool = new(256);
 
     public TransportBuffer Buffer { get; private set; } = null!;
 
     public static TransportData Rent(TransportBuffer buffer)
     {
-        if (!Pool.TryPop(out var item))
+        if (!Pool.TryRent(out var item))
         {
             item = new TransportData();
         }
@@ -34,10 +34,7 @@ public sealed class TransportData : ITransportOutbound, ITransportInbound
     public void Return()
     {
         Buffer = null!;
-        if (Pool.Count < 256)
-        {
-            Pool.Push(this);
-        }
+        Pool.Return(this);
     }
 }
 

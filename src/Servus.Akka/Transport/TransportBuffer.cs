@@ -1,11 +1,10 @@
 using System.Buffers;
-using System.Collections.Concurrent;
 
 namespace Servus.Akka.Transport;
 
 public sealed class TransportBuffer : IDisposable
 {
-    private static readonly ConcurrentStack<TransportBuffer> Pool = new();
+    private static readonly ObjectPool<TransportBuffer> Pool = new(Environment.ProcessorCount * 4);
 
     private IMemoryOwner<byte>? _owner;
     private int _offset;
@@ -30,7 +29,7 @@ public sealed class TransportBuffer : IDisposable
     public static TransportBuffer Rent(int minimumSize)
     {
         var owner = MemoryPool<byte>.Shared.Rent(minimumSize);
-        if (!Pool.TryPop(out var buf))
+        if (!Pool.TryRent(out var buf))
         {
             return new TransportBuffer { _owner = owner };
         }
@@ -56,7 +55,7 @@ public sealed class TransportBuffer : IDisposable
     // 'owner' and disposes it on Dispose, exactly as the non-offset overload does.
     public static TransportBuffer Wrap(IMemoryOwner<byte> owner, int offset, int length)
     {
-        if (!Pool.TryPop(out var buf))
+        if (!Pool.TryRent(out var buf))
         {
             return new TransportBuffer { _owner = owner, _offset = offset, Length = length };
         }
@@ -81,9 +80,9 @@ public sealed class TransportBuffer : IDisposable
         owner?.Dispose();
         _offset = 0;
 
-        if (MaxPoolSize > 0 && Pool.Count < MaxPoolSize)
+        if (MaxPoolSize > 0)
         {
-            Pool.Push(this);
+            Pool.Return(this);
         }
     }
 }
