@@ -130,6 +130,7 @@ internal sealed class TcpServerStateMachine(
         if (_connection is null)
         {
             data.Buffer.Dispose();
+            data.Return();
             ops.OnSignalPullOutbound();
             return;
         }
@@ -138,6 +139,7 @@ internal sealed class TcpServerStateMachine(
         data.Buffer.Memory.Span.CopyTo(mem.Span);
         _connection.OutputWriter.Advance(data.Buffer.Length);
         data.Buffer.Dispose();
+        data.Return();
 
         var gen = _connectionGen;
         var flush = _connection.OutputWriter.FlushAsync();
