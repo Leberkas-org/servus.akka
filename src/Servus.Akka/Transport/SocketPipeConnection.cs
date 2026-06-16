@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.IO.Pipelines;
+using System.Net.Quic;
 using System.Net.Sockets;
-using Servus.Akka.Transport.Tcp;
 
 namespace Servus.Akka.Transport;
 
@@ -118,8 +118,19 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
-        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
+        Task receiveLoop;
+        Task sendLoop;
+
+        if (stream is QuicStream quicStream)
+        {
+            receiveLoop = Task.Run(() => RunQuicReceiveLoop(quicStream, inputPipe.Writer, opts, ct));
+            sendLoop = Task.Run(() => RunQuicSendLoop(quicStream, outputPipe.Reader, ct));
+        }
+        else
+        {
+            receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
+            sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
+        }
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }
@@ -166,7 +177,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (Exception ex) when (IsTeardownException(ex))
         {
-            _ = ex;
+            // noop
         }
         finally
         {
@@ -206,7 +217,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (Exception ex) when (IsTeardownException(ex))
         {
-            _ = ex;
+            // noop
         }
         finally
         {
@@ -250,7 +261,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (Exception ex) when (IsTeardownException(ex))
         {
-            _ = ex;
+            // noop
         }
         finally
         {
@@ -304,7 +315,112 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
         catch (Exception ex) when (IsTeardownException(ex))
         {
-            _ = ex;
+            // noop
+        }
+        finally
+        {
+            await reader.CompleteAsync();
+        }
+    }
+
+    private static async Task RunQuicReceiveLoop(
+        QuicStream stream,
+        PipeWriter writer,
+        SocketPipeConnectionOptions options,
+        CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // Avoid crossing into QuicStream.ReadAsync when the peer has already closed
+                // the read side (FIN received or RESET_STREAM). Checking ReadsClosed.IsCompleted
+                // is synchronous — no allocation — and prevents a QuicException(StreamAborted)
+                // that would otherwise be thrown, caught, and discarded per request teardown.
+                if (stream.ReadsClosed.IsCompleted)
+                {
+                    break;
+                }
+
+                var buffer = writer.GetMemory(options.ReceiveBufferHint);
+                var bytesRead = await stream.ReadAsync(buffer, ct);
+
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                writer.Advance(bytesRead);
+                var flushTask = writer.FlushAsync(ct);
+                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
+
+                if (flush.IsCompleted || flush.IsCanceled)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex) when (IsTeardownException(ex))
+        {
+            // noop
+        }
+        finally
+        {
+            await writer.CompleteAsync();
+        }
+    }
+
+    private static async Task RunQuicSendLoop(
+        QuicStream stream,
+        PipeReader reader,
+        CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                // Avoid crossing into QuicStream.WriteAsync when the peer has sent STOP_SENDING
+                // (WritesClosed is complete). A write attempt after that always throws
+                // QuicException(StreamAborted) — checking first eliminates the allocation.
+                if (stream.WritesClosed.IsCompleted)
+                {
+                    break;
+                }
+
+                var readTask = reader.ReadAsync(ct);
+                var result = readTask.IsCompletedSuccessfully ? readTask.Result : await readTask;
+                var buffer = result.Buffer;
+
+                if (buffer.IsEmpty && result.IsCompleted)
+                {
+                    break;
+                }
+
+                if (buffer.IsSingleSegment)
+                {
+                    await stream.WriteAsync(buffer.First, ct);
+                }
+                else
+                {
+                    var length = (int)buffer.Length;
+                    var rented = ArrayPool<byte>.Shared.Rent(length);
+                    buffer.CopyTo(rented);
+                    await stream.WriteAsync(rented.AsMemory(0, length), ct);
+                    ArrayPool<byte>.Shared.Return(rented);
+                }
+
+                await stream.FlushAsync(ct);
+                reader.AdvanceTo(buffer.End);
+
+                if (result.IsCompleted)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception ex) when (IsTeardownException(ex))
+        {
+            // noop
         }
         finally
         {
@@ -324,7 +440,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
             }
             catch (Exception ex) when (IsTeardownException(ex))
             {
-                _ = ex;
+                // noop
             }
 
             _socket.Close();
