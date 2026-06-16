@@ -284,10 +284,13 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
                 else
                 {
-                    foreach (var segment in buffer)
-                    {
-                        await stream.WriteAsync(segment, ct);
-                    }
+                    // Coalesce all segments into one ArrayPool buffer so that TLS (SslStream)
+                    // produces a single record + one kernel send instead of N syscalls per segment.
+                    var length = (int)buffer.Length;
+                    var rented = ArrayPool<byte>.Shared.Rent(length);
+                    buffer.CopyTo(rented);
+                    await stream.WriteAsync(rented.AsMemory(0, length), ct);
+                    ArrayPool<byte>.Shared.Return(rented);
                 }
 
                 await stream.FlushAsync(ct);
