@@ -138,6 +138,34 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     private static bool IsTeardownException(Exception ex) =>
         ex is OperationCanceledException or SocketException or IOException or ObjectDisposedException;
 
+    private const int AdaptiveMinHint = 4 * 1024;
+    private const int AdaptiveMaxHint = 128 * 1024;
+    private const int ShrinkStreakThreshold = 2;
+
+    private static void AdaptHint(int bytesRead, ref int currentHint, ref int shrinkStreak)
+    {
+        if (bytesRead >= currentHint * 3 / 4)
+        {
+            shrinkStreak = 0;
+            if (currentHint < AdaptiveMaxHint)
+            {
+                currentHint = Math.Min(currentHint * 2, AdaptiveMaxHint);
+            }
+        }
+        else if (bytesRead < currentHint / 4)
+        {
+            if (++shrinkStreak >= ShrinkStreakThreshold && currentHint > AdaptiveMinHint)
+            {
+                currentHint = Math.Max(currentHint / 2, AdaptiveMinHint);
+                shrinkStreak = 0;
+            }
+        }
+        else
+        {
+            shrinkStreak = 0;
+        }
+    }
+
     private static async Task RunSocketReceiveLoop(
         Socket socket,
         PipeWriter writer,
@@ -145,6 +173,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         CancellationToken ct)
     {
         var receiver = new SocketAwaitable();
+        var currentHint = options.ReceiveBufferHint;
+        var shrinkStreak = 0;
 
         try
         {
@@ -155,7 +185,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     await receiver.WaitForDataAsync(socket);
                 }
 
-                var buffer = writer.GetMemory(options.ReceiveBufferHint);
+                var buffer = writer.GetMemory(currentHint);
                 var bytesRead = await receiver.ReceiveAsync(socket, buffer);
 
                 if (bytesRead == 0)
@@ -163,9 +193,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     break;
                 }
 
+                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
+
                 writer.Advance(bytesRead);
-                // Guarded sync fast-path: read .Result only when the flush already completed (the
-                // common case while the reader keeps up), skipping the awaiter dance. Never blocks.
                 var flushTask = writer.FlushAsync(ct);
                 var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
 
@@ -191,11 +221,14 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         SocketPipeConnectionOptions options,
         CancellationToken ct)
     {
+        var currentHint = options.ReceiveBufferHint;
+        var shrinkStreak = 0;
+
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                var buffer = writer.GetMemory(options.ReceiveBufferHint);
+                var buffer = writer.GetMemory(currentHint);
                 var bytesRead = await stream.ReadAsync(buffer, ct);
 
                 if (bytesRead == 0)
@@ -203,9 +236,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     break;
                 }
 
+                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
+
                 writer.Advance(bytesRead);
-                // Guarded sync fast-path: read .Result only when the flush already completed (the
-                // common case while the reader keeps up), skipping the awaiter dance. Never blocks.
                 var flushTask = writer.FlushAsync(ct);
                 var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
 
@@ -329,26 +362,27 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         SocketPipeConnectionOptions options,
         CancellationToken ct)
     {
+        var currentHint = options.ReceiveBufferHint;
+        var shrinkStreak = 0;
+
         try
         {
             while (!ct.IsCancellationRequested)
             {
-                // Avoid crossing into QuicStream.ReadAsync when the peer has already closed
-                // the read side (FIN received or RESET_STREAM). Checking ReadsClosed.IsCompleted
-                // is synchronous — no allocation — and prevents a QuicException(StreamAborted)
-                // that would otherwise be thrown, caught, and discarded per request teardown.
                 if (stream.ReadsClosed.IsCompleted)
                 {
                     break;
                 }
 
-                var buffer = writer.GetMemory(options.ReceiveBufferHint);
+                var buffer = writer.GetMemory(currentHint);
                 var bytesRead = await stream.ReadAsync(buffer, ct);
 
                 if (bytesRead == 0)
                 {
                     break;
                 }
+
+                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
 
                 writer.Advance(bytesRead);
                 var flushTask = writer.FlushAsync(ct);
