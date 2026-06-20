@@ -535,7 +535,12 @@ public sealed class QuicTransportStateMachine(
 
             if (result is null)
             {
-                continue;
+                // A null result here (the cancellation case is handled above) means
+                // AcceptInboundStreamAsync threw — for QUIC that only happens when the connection is
+                // aborted/idle/closed, which is terminal. Stop the loop instead of busy-spinning
+                // (re-throwing a QuicException every iteration with no backoff); the connection failure
+                // is surfaced by the stream read pumps and the pool's liveness check.
+                return;
             }
 
             self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));

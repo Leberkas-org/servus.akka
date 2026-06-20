@@ -41,7 +41,7 @@ internal sealed class QuicConnectionFactory : IQuicConnectionFactory
             getRemoteEndPoint: () => provider.RemoteEndPoint,
             dispose: () => provider.DisposeAsync());
 
-        return new QuicConnectionLease(handle, options.MaxBidirectionalStreams);
+        return new QuicConnectionLease(handle, options.MaxBidirectionalStreams, idleTimeout: options.IdleTimeout);
     }
 }
 

@@ -66,6 +66,22 @@ public sealed class QuicConnectionLeaseSpec
     }
 
     [Fact(Timeout = 5000)]
+    public async Task CanAcceptStream_should_return_false_after_idle_timeout_so_the_pool_does_not_reuse_a_closed_connection()
+    {
+        // MsQuic silently idle-closes a connection after its idle timeout without notifying the lease.
+        // An idle lease that has passed the idle timeout must report it cannot accept a stream, so the
+        // pool establishes a fresh connection instead of handing out a dead one.
+        var handle = CreateTestHandle();
+        var lease = new QuicConnectionLease(handle, 10, idleTimeout: TimeSpan.FromMilliseconds(50));
+
+        Assert.True(lease.CanAcceptStream());
+
+        await Task.Delay(120, TestContext.Current.CancellationToken);
+
+        Assert.False(lease.CanAcceptStream());
+    }
+
+    [Fact(Timeout = 5000)]
     public void CanAcceptStream_should_return_true_when_below_max()
     {
         var handle = CreateTestHandle();
