@@ -12,6 +12,7 @@ public sealed class TcpConnectionStateMachine(
     IActorRef self)
 {
     private const string ConnectTimerKey = "connect-timeout";
+    private const int MaxSyncReads = 8;
 
     private ConnectionLease? _currentLease;
     private bool _leaseReturned;
@@ -25,6 +26,7 @@ public sealed class TcpConnectionStateMachine(
 
     private SequencePosition? _pendingAdvance;
     private bool _readInProgress;
+    private int _syncReadBudget = MaxSyncReads;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
@@ -152,7 +154,18 @@ public sealed class TcpConnectionStateMachine(
         }
 
         var gen = _connectionGen;
-        connection.InputReader.ReadAsync().PipeTo(self,
+        var readTask = connection.InputReader.ReadAsync();
+
+        if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
+        {
+            _syncReadBudget--;
+            _readInProgress = false;
+            OnPipeReadComplete(readTask.Result);
+            return;
+        }
+
+        _syncReadBudget = MaxSyncReads;
+        readTask.PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
             failure: ex => new PipeReadFailed(ex, gen));
     }

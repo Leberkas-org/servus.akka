@@ -17,10 +17,13 @@ internal sealed class TcpServerStateMachine(
     SocketPipeConnectionOptions? pipeOptions = null,
     Socket? socket = null)
 {
+    private const int MaxSyncReads = 8;
+
     private SocketPipeConnection? _connection;
     private SequencePosition? _pendingAdvance;
     private int _connectionGen;
     private bool _upstreamFinished;
+    private int _syncReadBudget = MaxSyncReads;
 
     public void Start()
     {
@@ -120,7 +123,17 @@ internal sealed class TcpServerStateMachine(
         }
 
         var gen = _connectionGen;
-        _connection.InputReader.ReadAsync().PipeTo(self,
+        var readTask = _connection.InputReader.ReadAsync();
+
+        if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
+        {
+            _syncReadBudget--;
+            OnPipeReadComplete(readTask.Result);
+            return;
+        }
+
+        _syncReadBudget = MaxSyncReads;
+        readTask.PipeTo(self,
             success: result => new PipeReadComplete(result, gen),
             failure: ex => new PipeReadFailed(ex, gen));
     }

@@ -12,6 +12,7 @@ public sealed class QuicTransportStateMachine(
 {
     private const string ConnectTimerKey = "connect-timeout";
     private const string MigrationCheckTimerKey = "migration-check";
+    private const int MaxSyncReads = 8;
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
 
     private QuicConnectionHandle? _connectionHandle;
@@ -27,6 +28,7 @@ public sealed class QuicTransportStateMachine(
     private EndPoint? _lastRemoteEndPoint;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
+    private int _syncReadBudget = MaxSyncReads;
 
     internal void Dispatch(IQuicTransportEvent evt)
     {
@@ -288,7 +290,30 @@ public sealed class QuicTransportStateMachine(
         }
 
         var reader = state.InputReader;
-        reader.ReadAsync().PipeTo(self,
+        var readTask = reader.ReadAsync();
+
+        if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
+        {
+            _syncReadBudget--;
+            var result = readTask.Result;
+
+            TransportBuffer? buf = null;
+            if (result.Buffer.Length > 0)
+            {
+                var length = (int)result.Buffer.Length;
+                buf = TransportBuffer.Rent(length);
+                result.Buffer.CopyTo(buf.FullMemory.Span);
+                buf.Length = length;
+            }
+
+            reader.AdvanceTo(result.Buffer.End);
+            OnPipeStreamReadComplete(new PipeStreamReadComplete(
+                buf, streamId.Value, gen, result.IsCompleted || result.IsCanceled));
+            return;
+        }
+
+        _syncReadBudget = MaxSyncReads;
+        readTask.PipeTo(self,
             success: result =>
             {
                 TransportBuffer? buf = null;
