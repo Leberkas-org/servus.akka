@@ -17,7 +17,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
 {
     private SocketPipeConnection? _connection;
     private Stream? _stream;
-    private Queue<TransportBuffer>? _openingBuffer = new();
+    private Queue<TransportBuffer>? _openingBuffer;
     private Task? _drainTask;
 
     public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
@@ -62,7 +62,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     {
         if (_connection is null)
         {
-            _openingBuffer?.Enqueue(buffer);
+            (_openingBuffer ??= new Queue<TransportBuffer>()).Enqueue(buffer);
             return;
         }
 

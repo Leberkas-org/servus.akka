@@ -296,4 +296,13 @@ public sealed class QuicStreamStateSpec
         Assert.Equal(StreamPhase.HalfClosedRead, state.Phase);
     }
 
+    [Fact(Timeout = 5000)]
+    public void Write_during_opening_buffers_the_payload()
+    {
+        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        Assert.Equal(0, state.PendingWriteCount);
+        state.Write(new byte[] { 1, 2, 3 });
+        Assert.Equal(1, state.PendingWriteCount);
+    }
+
 }
