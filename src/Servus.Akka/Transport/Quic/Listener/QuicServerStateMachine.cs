@@ -178,7 +178,7 @@ internal sealed class QuicServerStateMachine(
             return;
         }
 
-        state.AttachConnection(stream);
+        state.AttachConnection(stream, rawStreamId);
         if (state.Direction == StreamDirection.Bidirectional)
         {
             RequestStreamRead(streamId, _connectionGen);
@@ -194,7 +194,7 @@ internal sealed class QuicServerStateMachine(
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
         var state = new QuicStreamState(direction, pipeOptions);
-        state.AttachConnection(stream);
+        state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
         RequestStreamRead(streamId, _connectionGen);
@@ -216,22 +216,9 @@ internal sealed class QuicServerStateMachine(
             return;
         }
 
-        var reader = state.InputReader;
-        reader.ReadAsync().PipeTo(self,
-            success: result =>
-            {
-                TransportBuffer? buf = null;
-                if (result.Buffer.Length > 0)
-                {
-                    var length = (int)result.Buffer.Length;
-                    buf = TransportBuffer.Rent(length);
-                    result.Buffer.CopyTo(buf.FullMemory.Span);
-                    buf.Length = length;
-                }
-
-                reader.AdvanceTo(result.Buffer.End);
-                return new PipeStreamReadComplete(buf, streamId.Value, gen, result.IsCompleted || result.IsCanceled);
-            },
+        state.ReadGen = gen;
+        state.InputReader.ReadAsync().PipeTo(self,
+            success: state.ReadSuccessTransform!,
             failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));
     }
 

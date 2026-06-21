@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.IO.Pipelines;
 using System.Net.Quic;
 using static Servus.Senf;
@@ -19,6 +20,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     private Stream? _stream;
     private Queue<TransportBuffer>? _openingBuffer;
     private Task? _drainTask;
+    private PipeReader? _cachedReader;
 
     public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
     public StreamDirection Direction { get; } = direction;
@@ -26,15 +28,49 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     public bool IsCompleteWritesDeferred { get; private set; }
     public PipeReader? InputReader => _connection?.InputReader;
 
+    /// <summary>
+    /// The connection generation that will be stamped into the next <see cref="PipeStreamReadComplete"/>
+    /// message. Set by the state machine immediately before calling PipeTo, so the cached delegate
+    /// picks it up at invocation time without capturing it as a per-read local.
+    /// </summary>
+    internal int ReadGen;
+
+    /// <summary>
+    /// Cached per-stream success transform for PipeTo. Allocated once in
+    /// <see cref="AttachConnection"/> (and in <see cref="ActivateWithoutConnection"/> for tests),
+    /// reused for every subsequent read on this stream to avoid per-read closure allocations.
+    /// </summary>
+    internal Func<ReadResult, IQuicTransportEvent>? ReadSuccessTransform;
+
+    private Func<ReadResult, IQuicTransportEvent> BuildReadSuccessTransform(long rawStreamId)
+    {
+        return result =>
+        {
+            TransportBuffer? buf = null;
+            if (result.Buffer.Length > 0)
+            {
+                var length = (int)result.Buffer.Length;
+                buf = TransportBuffer.Rent(length);
+                result.Buffer.CopyTo(buf.FullMemory.Span);
+                buf.Length = length;
+            }
+
+            _cachedReader!.AdvanceTo(result.Buffer.End);
+            return new PipeStreamReadComplete(buf, rawStreamId, ReadGen, result.IsCompleted || result.IsCanceled);
+        };
+    }
+
     internal void ActivateWithoutConnection()
     {
         Phase = StreamPhase.Active;
     }
 
-    public void AttachConnection(Stream stream)
+    public void AttachConnection(Stream stream, long rawStreamId = 0)
     {
         _stream = stream;
         _connection = SocketPipeConnection.Create(stream, pipeOptions);
+        _cachedReader = _connection.InputReader;
+        ReadSuccessTransform = BuildReadSuccessTransform(rawStreamId);
 
         if (_openingBuffer is not null)
         {
