@@ -11,6 +11,7 @@ internal class TcpClientProvider(TcpTransportOptions options) : IAsyncDisposable
 
     public EndPoint? LocalEndPoint => _socket?.LocalEndPoint;
     public EndPoint? RemoteEndPoint => _socket?.RemoteEndPoint;
+    public Socket? ConnectedSocket => _socket;
 
     public async Task<Stream> GetStreamAsync(CancellationToken ct = default)
     {

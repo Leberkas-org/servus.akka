@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 
 namespace Servus.Akka.Transport.Tcp.Client;
 
@@ -7,6 +8,7 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
     public async Task<ConnectionLease> EstablishAsync(TransportOptions options, CancellationToken ct)
     {
         Stream stream;
+        Socket? plaintextSocket = null;
         EndPoint? localEndPoint;
         EndPoint? remoteEndPoint;
         TransportProtocol protocol;
@@ -29,6 +31,7 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
         {
             var tcpProvider = new TcpClientProvider(tcpOpts);
             stream = await tcpProvider.GetStreamAsync(ct).ConfigureAwait(false);
+            plaintextSocket = tcpProvider.ConnectedSocket;
             localEndPoint = tcpProvider.LocalEndPoint;
             remoteEndPoint = tcpProvider.RemoteEndPoint;
             protocol = TransportProtocol.Tcp;
@@ -45,7 +48,9 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
             security);
 
         var pipeOptions = SocketPipeConnectionOptions.FromTransport(options);
-        var connection = SocketPipeConnection.Create(stream, pipeOptions);
+        var connection = plaintextSocket is not null
+            ? SocketPipeConnection.Create(plaintextSocket, pipeOptions)
+            : SocketPipeConnection.Create(stream, pipeOptions);
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, info);
 
