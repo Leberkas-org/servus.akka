@@ -25,7 +25,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
     {
         public readonly TcpPoolConfig Config = config;
         public readonly List<ConnectionLease> Leases = [];
-        public readonly Queue<ConnectionLease> Idle = new();
+        public readonly Stack<ConnectionLease> Idle = new();
         public readonly Queue<Acquire> Pending = new();
         public int Establishing;
     }
@@ -82,7 +82,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
         var host = GetOrCreateHost(msg.Options);
         Tracing.For("Pool").Trace(this, "Acquire {0}:{1}", msg.Options.Host, msg.Options.Port);
 
-        while (host.Idle.TryDequeue(out var idle))
+        while (host.Idle.TryPop(out var idle))
         {
             if (idle.IsAlive() && !idle.IsExpired(host.Config.ConnectionLifetime))
             {
@@ -139,7 +139,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
             }
         }
 
-        host.Idle.Enqueue(msg.Lease);
+        host.Idle.Push(msg.Lease);
     }
 
     private void OnEstablished(Established msg)
@@ -185,9 +185,9 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
         foreach (var host in _hosts.Values)
         {
             var toRemove = new List<ConnectionLease>();
-            var newIdle = new Queue<ConnectionLease>();
+            var survivors = new List<ConnectionLease>();
 
-            while (host.Idle.TryDequeue(out var lease))
+            while (host.Idle.TryPop(out var lease))
             {
                 if (!lease.IsAlive() || lease.IsExpired(host.Config.ConnectionLifetime))
                 {
@@ -195,13 +195,13 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
                 }
                 else
                 {
-                    newIdle.Enqueue(lease);
+                    survivors.Add(lease);
                 }
             }
 
-            while (newIdle.TryDequeue(out var kept))
+            for (var i = survivors.Count - 1; i >= 0; i--)
             {
-                host.Idle.Enqueue(kept);
+                host.Idle.Push(survivors[i]);
             }
 
             foreach (var lease in toRemove)

@@ -670,4 +670,33 @@ public sealed class TcpConnectionManagerActorSpec : TestKit
         }
     }
 
+    [Fact(Timeout = 5000)]
+    public async Task Acquire_should_prefer_most_recently_released_connection()
+    {
+        var actor = CreateActor();
+        var options = CreateOptions();
+
+        var lease1 = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        var lease2 = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        var lease3 = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        actor.Tell(new TcpConnectionManagerActor.Release(lease1, CanReuse: true));
+        actor.Tell(new TcpConnectionManagerActor.Release(lease2, CanReuse: true));
+        actor.Tell(new TcpConnectionManagerActor.Release(lease3, CanReuse: true));
+
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        var reacquired = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(lease3, reacquired);
+
+        reacquired.Dispose();
+        lease1.Dispose();
+        lease2.Dispose();
+    }
+
 }
