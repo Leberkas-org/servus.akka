@@ -42,6 +42,34 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     /// </summary>
     internal Func<ReadResult, IQuicTransportEvent>? ReadSuccessTransform;
 
+    /// <summary>
+    /// Direct-read transform used when the stream is a <see cref="System.Net.Quic.QuicStream"/>.
+    /// Converts a raw byte count into a <see cref="PipeStreamReadComplete"/> event, consuming and
+    /// clearing <see cref="PendingReadBuffer"/> in the process.
+    /// </summary>
+    internal Func<int, IQuicTransportEvent>? DirectReadTransform;
+
+    /// <summary>
+    /// The underlying <see cref="System.Net.Quic.QuicStream"/> if the connection was attached via
+    /// a QuicStream; null otherwise.
+    /// </summary>
+    internal QuicStream? QuicStream => _stream as QuicStream;
+
+    private TransportBuffer? _pendingReadBuffer;
+
+    internal TransportBuffer? PendingReadBuffer
+    {
+        get => _pendingReadBuffer;
+        set => _pendingReadBuffer = value;
+    }
+
+    internal void DisposePendingReadBuffer()
+    {
+        var buf = _pendingReadBuffer;
+        _pendingReadBuffer = null;
+        buf?.Dispose();
+    }
+
     private Func<ReadResult, IQuicTransportEvent> BuildReadSuccessTransform(long rawStreamId)
     {
         return result =>
@@ -60,6 +88,22 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
         };
     }
 
+    private Func<int, IQuicTransportEvent> BuildDirectReadTransform(long rawStreamId)
+    {
+        return bytesRead =>
+        {
+            var buf = _pendingReadBuffer;
+            _pendingReadBuffer = null;
+            if (bytesRead == 0 || buf is null)
+            {
+                buf?.Dispose();
+                return new PipeStreamReadComplete(null, rawStreamId, ReadGen, true);
+            }
+            buf.Length = bytesRead;
+            return new PipeStreamReadComplete(buf, rawStreamId, ReadGen, false);
+        };
+    }
+
     internal void ActivateWithoutConnection()
     {
         Phase = StreamPhase.Active;
@@ -68,9 +112,18 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     public void AttachConnection(Stream stream, long rawStreamId = 0)
     {
         _stream = stream;
-        _connection = SocketPipeConnection.Create(stream, pipeOptions);
-        _cachedReader = _connection.InputReader;
-        ReadSuccessTransform = BuildReadSuccessTransform(rawStreamId);
+
+        if (stream is QuicStream qs)
+        {
+            _connection = SocketPipeConnection.CreateForQuic(qs, pipeOptions);
+            DirectReadTransform = BuildDirectReadTransform(rawStreamId);
+        }
+        else
+        {
+            _connection = SocketPipeConnection.Create(stream, pipeOptions);
+            _cachedReader = _connection.InputReader;
+            ReadSuccessTransform = BuildReadSuccessTransform(rawStreamId);
+        }
 
         if (_openingBuffer is not null)
         {
@@ -189,6 +242,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
 
     public async ValueTask DisposeAsync()
     {
+        DisposePendingReadBuffer();
         DisposePendingWrites();
 
         if (_drainTask is not null)

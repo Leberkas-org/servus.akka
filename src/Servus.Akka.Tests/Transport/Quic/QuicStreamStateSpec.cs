@@ -305,4 +305,31 @@ public sealed class QuicStreamStateSpec
         Assert.Equal(1, state.PendingWriteCount);
     }
 
+    [Fact(Timeout = 5000)]
+    public void AttachConnection_with_QuicStream_should_set_DirectReadTransform()
+    {
+        var state = new QuicStreamState(StreamDirection.Bidirectional);
+
+        // MemoryStream is not a QuicStream, so DirectReadTransform stays null
+        state.AttachConnection(new MemoryStream());
+
+        Assert.Null(state.DirectReadTransform);
+        Assert.Null(state.QuicStream);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task DisposeAsync_should_dispose_pending_read_buffer()
+    {
+        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        state.AttachConnection(new MemoryStream());
+
+        var buf = TransportBuffer.Rent(64);
+        buf.Length = 10;
+        state.PendingReadBuffer = buf;
+
+        await state.DisposeAsync();
+
+        Assert.Null(state.PendingReadBuffer);
+    }
+
 }

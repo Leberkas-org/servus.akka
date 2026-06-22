@@ -43,6 +43,10 @@ internal sealed class QuicServerStateMachine(
                 {
                     OnPipeStreamReadComplete(e);
                 }
+                else
+                {
+                    e.Buffer?.Dispose();
+                }
 
                 break;
             case PipeStreamReadFailed e:
@@ -197,8 +201,8 @@ internal sealed class QuicServerStateMachine(
         state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
-        RequestStreamRead(streamId, _connectionGen);
         ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
+        RequestStreamRead(streamId, _connectionGen);
     }
 
     internal void RegisterTestStream(long streamId, StreamDirection direction)
@@ -211,12 +215,39 @@ internal sealed class QuicServerStateMachine(
 
     private void RequestStreamRead(StreamTarget streamId, int gen)
     {
-        if (!_streams.TryGetValue(streamId, out var state) || state.InputReader is null)
+        if (!_streams.TryGetValue(streamId, out var state))
         {
             return;
         }
 
         state.ReadGen = gen;
+
+        if (state.DirectReadTransform is not null)
+        {
+            var qs = state.QuicStream!;
+            if (qs.ReadsClosed.IsCompleted)
+            {
+                OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
+                return;
+            }
+
+            var buf = TransportBuffer.Rent(4 * 1024);
+            state.PendingReadBuffer = buf;
+            qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
+                success: state.DirectReadTransform,
+                failure: ex =>
+                {
+                    state.DisposePendingReadBuffer();
+                    return new PipeStreamReadFailed(ex, streamId.Value, gen);
+                });
+            return;
+        }
+
+        if (state.InputReader is null)
+        {
+            return;
+        }
+
         state.InputReader.ReadAsync().PipeTo(self,
             success: state.ReadSuccessTransform!,
             failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));

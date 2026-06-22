@@ -13,8 +13,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     private readonly Task _sendLoop;
     private readonly CancellationTokenSource _cts;
     private readonly Socket? _socket;
+    private readonly PipeReader? _directInputReader;
 
-    public PipeReader InputReader => _inputPipe.Reader;
+
+    public PipeReader InputReader => _directInputReader ?? _inputPipe.Reader;
     public PipeWriter OutputWriter => _outputPipe.Writer;
 
     internal static SocketPipeConnection CreateInert()
@@ -45,6 +47,47 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         _sendLoop = sendLoop;
         _cts = cts;
         _socket = socket;
+    }
+
+    private SocketPipeConnection(
+        PipeReader directInputReader,
+        Pipe outputPipe,
+        Task sendLoop,
+        CancellationTokenSource cts)
+    {
+        _directInputReader = directInputReader;
+        _outputPipe = outputPipe;
+        _sendLoop = sendLoop;
+        _cts = cts;
+        // _inputPipe stays default (unused)
+        _receiveLoop = Task.CompletedTask;
+    }
+
+    public static SocketPipeConnection CreateForQuic(QuicStream stream, SocketPipeConnectionOptions? options = null)
+    {
+        var opts = options ?? new SocketPipeConnectionOptions();
+        var ioQueue = IOQueue.GetNext();
+
+        var fallbackReader = PipeReader.Create(stream, new StreamPipeReaderOptions(
+            pool: MemoryPool<byte>.Shared,
+            bufferSize: opts.MinimumSegmentSize,
+            leaveOpen: true));
+
+        var outputPipe = new Pipe(new PipeOptions(
+            pool: MemoryPool<byte>.Shared,
+            readerScheduler: ioQueue,
+            writerScheduler: PipeScheduler.ThreadPool,
+            minimumSegmentSize: opts.MinimumSegmentSize,
+            pauseWriterThreshold: opts.OutputPauseWriterThreshold,
+            resumeWriterThreshold: opts.OutputResumeWriterThreshold,
+            useSynchronizationContext: false));
+
+        var cts = new CancellationTokenSource();
+
+        // See Create(Socket) for why ct is NOT passed to Task.Run itself.
+        var sendLoop = Task.Run(() => RunQuicSendLoop(stream, outputPipe.Reader, cts.Token));
+
+        return new SocketPipeConnection(fallbackReader, outputPipe, sendLoop, cts);
     }
 
     public static SocketPipeConnection Create(Socket socket, SocketPipeConnectionOptions? options = null)
@@ -118,19 +161,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        Task receiveLoop;
-        Task sendLoop;
-
-        if (stream is QuicStream quicStream)
-        {
-            receiveLoop = Task.Run(() => RunQuicReceiveLoop(quicStream, inputPipe.Writer, opts, ct));
-            sendLoop = Task.Run(() => RunQuicSendLoop(quicStream, outputPipe.Reader, ct));
-        }
-        else
-        {
-            receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
-            sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
-        }
+        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
 
         return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
     }
@@ -356,54 +388,6 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
     }
 
-    private static async Task RunQuicReceiveLoop(
-        QuicStream stream,
-        PipeWriter writer,
-        SocketPipeConnectionOptions options,
-        CancellationToken ct)
-    {
-        var currentHint = options.ReceiveBufferHint;
-        var shrinkStreak = 0;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                if (stream.ReadsClosed.IsCompleted)
-                {
-                    break;
-                }
-
-                var buffer = writer.GetMemory(currentHint);
-                var bytesRead = await stream.ReadAsync(buffer, ct);
-
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-
-                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
-
-                writer.Advance(bytesRead);
-                var flushTask = writer.FlushAsync(ct);
-                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
-
-                if (flush.IsCompleted || flush.IsCanceled)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex) when (IsTeardownException(ex))
-        {
-            // noop
-        }
-        finally
-        {
-            await writer.CompleteAsync();
-        }
-    }
-
     private static async Task RunQuicSendLoop(
         QuicStream stream,
         PipeReader reader,
@@ -480,11 +464,20 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
             _socket.Close();
         }
 
-        _inputPipe.Writer.CancelPendingFlush();
-        _outputPipe.Reader.CancelPendingRead();
-        await _outputPipe.Writer.CompleteAsync();
-
-        await Task.WhenAll(_receiveLoop, _sendLoop);
+        if (_directInputReader is not null)
+        {
+            await _directInputReader.CompleteAsync();
+            _outputPipe.Reader.CancelPendingRead();
+            await _outputPipe.Writer.CompleteAsync();
+            await _sendLoop;
+        }
+        else
+        {
+            _inputPipe.Writer.CancelPendingFlush();
+            _outputPipe.Reader.CancelPendingRead();
+            await _outputPipe.Writer.CompleteAsync();
+            await Task.WhenAll(_receiveLoop, _sendLoop);
+        }
 
         _cts.Dispose();
     }

@@ -48,6 +48,10 @@ public sealed class QuicTransportStateMachine(
                 {
                     OnPipeStreamReadComplete(e);
                 }
+                else
+                {
+                    e.Buffer?.Dispose();
+                }
 
                 break;
             case PipeStreamReadFailed e:
@@ -270,8 +274,8 @@ public sealed class QuicTransportStateMachine(
         state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
-        RequestStreamRead(streamId, _connectionGen);
         ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
+        RequestStreamRead(streamId, _connectionGen);
     }
 
     internal void RegisterTestStream(long streamId, StreamDirection direction)
@@ -284,7 +288,35 @@ public sealed class QuicTransportStateMachine(
 
     private void RequestStreamRead(StreamTarget streamId, int gen)
     {
-        if (!_streams.TryGetValue(streamId, out var state) || state.InputReader is null)
+        if (!_streams.TryGetValue(streamId, out var state))
+        {
+            return;
+        }
+
+        state.ReadGen = gen;
+
+        if (state.DirectReadTransform is not null)
+        {
+            var qs = state.QuicStream!;
+            if (qs.ReadsClosed.IsCompleted)
+            {
+                OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
+                return;
+            }
+
+            var buf = TransportBuffer.Rent(4 * 1024);
+            state.PendingReadBuffer = buf;
+            qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
+                success: state.DirectReadTransform,
+                failure: ex =>
+                {
+                    state.DisposePendingReadBuffer();
+                    return new PipeStreamReadFailed(ex, streamId.Value, gen);
+                });
+            return;
+        }
+
+        if (state.InputReader is null)
         {
             return;
         }
@@ -297,23 +329,22 @@ public sealed class QuicTransportStateMachine(
             _syncReadBudget--;
             var result = readTask.Result;
 
-            TransportBuffer? buf = null;
+            TransportBuffer? tbuf = null;
             if (result.Buffer.Length > 0)
             {
                 var length = (int)result.Buffer.Length;
-                buf = TransportBuffer.Rent(length);
-                result.Buffer.CopyTo(buf.FullMemory.Span);
-                buf.Length = length;
+                tbuf = TransportBuffer.Rent(length);
+                result.Buffer.CopyTo(tbuf.FullMemory.Span);
+                tbuf.Length = length;
             }
 
             reader.AdvanceTo(result.Buffer.End);
             OnPipeStreamReadComplete(new PipeStreamReadComplete(
-                buf, streamId.Value, gen, result.IsCompleted || result.IsCanceled));
+                tbuf, streamId.Value, gen, result.IsCompleted || result.IsCanceled));
             return;
         }
 
         _syncReadBudget = MaxSyncReads;
-        state.ReadGen = gen;
         readTask.PipeTo(self,
             success: state.ReadSuccessTransform!,
             failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));
