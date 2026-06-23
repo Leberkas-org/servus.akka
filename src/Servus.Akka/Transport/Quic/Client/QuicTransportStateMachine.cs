@@ -304,7 +304,7 @@ public sealed class QuicTransportStateMachine(
                 return;
             }
 
-            var buf = TransportBuffer.Rent(4 * 1024);
+            var buf = TransportBuffer.Rent(state.ReadHint);
             state.PendingReadBuffer = buf;
             qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
                 success: state.DirectReadTransform,

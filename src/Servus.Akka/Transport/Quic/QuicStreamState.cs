@@ -56,6 +56,41 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
     internal QuicStream? QuicStream => _stream as QuicStream;
 
     private TransportBuffer? _pendingReadBuffer;
+    private int _readHint = 4 * 1024;
+    private int _shrinkCount;
+
+    public int ReadHint => _readHint;
+
+    public void AdaptReadHint(int bytesRead)
+    {
+        if (bytesRead >= _readHint * 3 / 4)
+        {
+            _shrinkCount = 0;
+            if (_readHint < 128 * 1024)
+            {
+                _readHint = Math.Min(_readHint * 2, 128 * 1024);
+            }
+        }
+        else if (bytesRead < _readHint / 4)
+        {
+            _shrinkCount++;
+            if (_shrinkCount >= 2 && _readHint > 4 * 1024)
+            {
+                _readHint = Math.Max(_readHint / 2, 4 * 1024);
+                _shrinkCount = 0;
+            }
+        }
+        else
+        {
+            _shrinkCount = 0;
+        }
+    }
+
+    public void ResetReadHint()
+    {
+        _readHint = 4 * 1024;
+        _shrinkCount = 0;
+    }
 
     internal TransportBuffer? PendingReadBuffer
     {
@@ -100,6 +135,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
                 return new PipeStreamReadComplete(null, rawStreamId, ReadGen, true);
             }
             buf.Length = bytesRead;
+            AdaptReadHint(bytesRead);
             return new PipeStreamReadComplete(buf, rawStreamId, ReadGen, false);
         };
     }
