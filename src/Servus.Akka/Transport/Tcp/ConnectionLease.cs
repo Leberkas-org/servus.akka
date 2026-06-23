@@ -52,6 +52,6 @@ internal sealed class ConnectionLease : IDisposable
         _alive = false;
         _cts.Cancel();
         _cts.Dispose();
-        _ = Connection.DisposeAsync().AsTask();
+        _ = Connection.DisposeAsync();
     }
 }

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Net;
 using Akka.Actor;
 
@@ -309,28 +308,6 @@ internal sealed class QuicServerStateMachine(
         }
     }
 
-    private void HandleConnectionFailure(DisconnectReason reason)
-    {
-        foreach (var (target, state) in _streams)
-        {
-            ops.OnPushInbound(new StreamClosed(target, reason));
-            _ = state.DisposeAndReturnAsync();
-        }
-
-        _streams.Clear();
-
-        ops.OnPushInbound(new TransportDisconnected(reason));
-        StopAcceptLoop();
-
-        if (_upstreamFinished)
-        {
-            ops.OnCompleteStage();
-        }
-        else
-        {
-            ops.OnSignalPullOutbound();
-        }
-    }
 
     private void CheckForConnectionMigration()
     {

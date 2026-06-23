@@ -67,28 +67,28 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// </summary>
     internal QuicStream? QuicStream => _stream as QuicStream;
 
-    private TransportBuffer? _pendingReadBuffer;
-    private int _readHint = 4 * 1024;
     private int _shrinkCount;
 
-    public int ReadHint => _readHint;
+    public int ReadHint { get; private set; } = 4 * 1024;
+    
+    internal TransportBuffer? PendingReadBuffer { get; set; }
 
     public void AdaptReadHint(int bytesRead)
     {
-        if (bytesRead >= _readHint * 3 / 4)
+        if (bytesRead >= ReadHint * 3 / 4)
         {
             _shrinkCount = 0;
-            if (_readHint < 128 * 1024)
+            if (ReadHint < 128 * 1024)
             {
-                _readHint = Math.Min(_readHint * 2, 128 * 1024);
+                ReadHint = Math.Min(ReadHint * 2, 128 * 1024);
             }
         }
-        else if (bytesRead < _readHint / 4)
+        else if (bytesRead < ReadHint / 4)
         {
             _shrinkCount++;
-            if (_shrinkCount >= 2 && _readHint > 4 * 1024)
+            if (_shrinkCount >= 2 && ReadHint > 4 * 1024)
             {
-                _readHint = Math.Max(_readHint / 2, 4 * 1024);
+                ReadHint = Math.Max(ReadHint / 2, 4 * 1024);
                 _shrinkCount = 0;
             }
         }
@@ -100,7 +100,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
 
     public void ResetReadHint()
     {
-        _readHint = 4 * 1024;
+        ReadHint = 4 * 1024;
         _shrinkCount = 0;
     }
 
@@ -121,7 +121,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
     // Clears reference fields so the pooled object doesn't retain stale closures.
     private void ResetAfterDispose()
     {
-        _pendingReadBuffer = null;
+        PendingReadBuffer = null;
         _openingBuffer = null;
         _connection = null;
         _stream = null;
@@ -145,16 +145,11 @@ internal sealed class QuicStreamState : IAsyncDisposable
         Pool.Return(this);
     }
 
-    internal TransportBuffer? PendingReadBuffer
-    {
-        get => _pendingReadBuffer;
-        set => _pendingReadBuffer = value;
-    }
 
     internal void DisposePendingReadBuffer()
     {
-        var buf = _pendingReadBuffer;
-        _pendingReadBuffer = null;
+        var buf = PendingReadBuffer;
+        PendingReadBuffer = null;
         buf?.Dispose();
     }
 
@@ -180,8 +175,8 @@ internal sealed class QuicStreamState : IAsyncDisposable
     {
         return bytesRead =>
         {
-            var buf = _pendingReadBuffer;
-            _pendingReadBuffer = null;
+            var buf = PendingReadBuffer;
+            PendingReadBuffer = null;
             if (bytesRead == 0 || buf is null)
             {
                 buf?.Dispose();

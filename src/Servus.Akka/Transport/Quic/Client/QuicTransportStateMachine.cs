@@ -28,7 +28,7 @@ public sealed class QuicTransportStateMachine(
     private EndPoint? _lastRemoteEndPoint;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
-    private readonly HashSet<StreamTarget> _dirtyStreams = new();
+    private readonly HashSet<StreamTarget> _dirtyStreams = [];
     private int _syncReadBudget = MaxSyncReads;
 
     internal void Dispatch(IQuicTransportEvent evt)
