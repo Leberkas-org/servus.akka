@@ -94,7 +94,7 @@ public sealed class QuicServerStateMachineSpec
         ops.PullOutboundCount = 0;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new MultiplexedData(buffer, 999));
+        sm.HandlePush(MultiplexedData.Rent(buffer, 999));
 
         Assert.True(ops.PullOutboundCount > 0);
     }
@@ -213,7 +213,7 @@ public sealed class QuicServerStateMachineSpec
         ops.PullOutboundCount = 0;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new MultiplexedData(buffer, 1));
+        sm.HandlePush(MultiplexedData.Rent(buffer, 1));
 
         Assert.True(ops.PullOutboundCount > 0);
     }
@@ -328,7 +328,7 @@ public sealed class QuicServerStateMachineSpec
         ops.PullOutboundCount = 0;
 
         var buffer = CreateTestBuffer(1, 2, 3);
-        sm.HandlePush(new MultiplexedData(buffer, 1));
+        sm.HandlePush(MultiplexedData.Rent(buffer, 1));
 
         Assert.True(ops.PullOutboundCount > 0);
     }

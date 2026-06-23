@@ -38,4 +38,29 @@ public sealed class TransportData : ITransportOutbound, ITransportInbound
     }
 }
 
-public sealed record MultiplexedData(TransportBuffer Buffer, StreamTarget StreamId) : ITransportOutbound, ITransportInbound;
+public sealed class MultiplexedData : ITransportOutbound, ITransportInbound
+{
+    private static readonly ObjectPool<MultiplexedData> Pool = new(256);
+
+    public TransportBuffer Buffer { get; private set; } = null!;
+    public StreamTarget StreamId { get; private set; }
+
+    public static MultiplexedData Rent(TransportBuffer buffer, StreamTarget streamId)
+    {
+        if (!Pool.TryRent(out var item))
+        {
+            item = new MultiplexedData();
+        }
+
+        item.Buffer = buffer;
+        item.StreamId = streamId;
+        return item;
+    }
+
+    public void Return()
+    {
+        Buffer = null!;
+        StreamId = default;
+        Pool.Return(this);
+    }
+}

@@ -48,7 +48,7 @@ public static class TestConnectionStageExtensions
         var buf = TransportBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        stage.PushInbound(new MultiplexedData(buf, streamId));
+        stage.PushInbound(MultiplexedData.Rent(buf, streamId));
     }
 
     public static void PushConnectionMigration(this TestConnectionStage stage, System.Net.EndPoint oldEndPoint,
@@ -65,7 +65,7 @@ public static class TestConnectionStageExtensions
             var buf = TransportBuffer.Rent(frame.Length);
             frame.CopyTo(buf.FullMemory.Span);
             buf.Length = frame.Length;
-            stage.PushInbound(new MultiplexedData(buf, streamId));
+            stage.PushInbound(MultiplexedData.Rent(buf, streamId));
         }
 
         stage.PushInbound(new StreamReadCompleted(streamId));

@@ -337,7 +337,7 @@ public sealed class TestConnectionStageExtensionsSpec : global::Akka.TestKit.Xun
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
                 new OpenStream(1, StreamDirection.Bidirectional),
-                new MultiplexedData(TransportBuffer.Rent(0), 1)
+                MultiplexedData.Rent(TransportBuffer.Rent(0), 1)
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.Ignore<ITransportInbound>().MapMaterializedValue(_ => NotUsed.Instance), _materializer);

@@ -40,7 +40,7 @@ public static class TestConnectionStageBuilderExtensions
             var echo = TransportBuffer.Rent(data.Buffer.Length);
             data.Buffer.Span.CopyTo(echo.FullMemory.Span);
             echo.Length = data.Buffer.Length;
-            ctx.Push(data with { Buffer = echo });
+            ctx.Push(MultiplexedData.Rent(echo, data.StreamId));
         });
     }
 }

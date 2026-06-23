@@ -361,7 +361,7 @@ public sealed class QuicTransportStateMachine(
 
         if (evt.Buffer is not null)
         {
-            ops.OnPushInbound(new MultiplexedData(evt.Buffer, streamId));
+            ops.OnPushInbound(MultiplexedData.Rent(evt.Buffer, streamId));
         }
 
         if (evt.IsCompleted)

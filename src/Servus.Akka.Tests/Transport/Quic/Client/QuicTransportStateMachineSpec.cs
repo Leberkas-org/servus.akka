@@ -100,7 +100,7 @@ public sealed class QuicTransportStateMachineSpec
 
         var buffer = TransportBuffer.Rent(16);
         buffer.Length = 4;
-        sm.HandlePush(new MultiplexedData(buffer, 1));
+        sm.HandlePush(MultiplexedData.Rent(buffer, 1));
 
         Assert.True(ops.PullCount > 0);
     }
@@ -177,7 +177,7 @@ public sealed class QuicTransportStateMachineSpec
         var buffer = TransportBuffer.Rent(16);
         buffer.Length = 4;
 
-        sm.HandlePush(new MultiplexedData(buffer, 999));
+        sm.HandlePush(MultiplexedData.Rent(buffer, 999));
 
         Assert.Empty(ops.PushedInbound);
         Assert.True(ops.PullCount > 0);

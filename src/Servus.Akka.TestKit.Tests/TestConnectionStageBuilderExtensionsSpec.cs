@@ -113,7 +113,7 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new MultiplexedData(buf, 7)
+                MultiplexedData.Rent(buf, 7)
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.Ignore<ITransportInbound>().MapMaterializedValue(_ => NotUsed.Instance), _materializer);
@@ -254,7 +254,7 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                new MultiplexedData(originalBuf, 7)
+                MultiplexedData.Rent(originalBuf, 7)
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>
