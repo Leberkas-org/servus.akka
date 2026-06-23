@@ -308,11 +308,7 @@ public sealed class QuicTransportStateMachine(
             state.PendingReadBuffer = buf;
             qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
                 success: state.DirectReadTransform,
-                failure: ex =>
-                {
-                    state.DisposePendingReadBuffer();
-                    return new PipeStreamReadFailed(ex, streamId.Value, gen);
-                });
+                failure: state.FailureReadTransform);
             return;
         }
 
