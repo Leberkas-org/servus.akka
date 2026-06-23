@@ -268,15 +268,16 @@ internal sealed class QuicStreamState : IAsyncDisposable
         }
     }
 
-    public void Write(TransportBuffer buffer)
+    public bool Write(TransportBuffer buffer)
     {
         if (_connection is null)
         {
             (_openingBuffer ??= new Queue<TransportBuffer>()).Enqueue(buffer);
-            return;
+            return false;
         }
 
         WriteToOutputPipe(buffer);
+        return true;
     }
 
     public void CompleteWrites()

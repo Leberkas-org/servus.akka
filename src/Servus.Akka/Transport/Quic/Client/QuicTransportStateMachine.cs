@@ -185,8 +185,10 @@ public sealed class QuicTransportStateMachine(
     {
         if (_streams.TryGetValue(data.StreamId, out var state))
         {
-            state.Write(data.Buffer);
-            _dirtyStreams.Add(data.StreamId);
+            if (state.Write(data.Buffer))
+            {
+                _dirtyStreams.Add(data.StreamId);
+            }
         }
         else
         {
