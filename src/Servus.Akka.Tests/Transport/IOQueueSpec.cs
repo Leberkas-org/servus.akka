@@ -29,7 +29,7 @@ public sealed class IOQueueSpec
                 }
             }, counter));
 
-        await counter.Done.Task.WaitAsync(TimeSpan.FromSeconds(4));
+        await counter.Done.Task.WaitAsync(TimeSpan.FromSeconds(4), TestContext.Current.CancellationToken);
 
         Assert.Equal(counter.Target, Volatile.Read(ref counter.Ran));
     }

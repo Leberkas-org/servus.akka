@@ -7,7 +7,7 @@ namespace Servus.Akka.Transport;
 
 internal sealed class SocketPipeConnection : IAsyncDisposable
 {
-    private readonly Pipe _inputPipe;
+    private readonly Pipe _inputPipe = null!;
     private readonly Pipe _outputPipe;
     private readonly Task _receiveLoop;
     private readonly Task _sendLoop;
