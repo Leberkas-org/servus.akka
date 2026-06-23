@@ -193,6 +193,7 @@ public sealed class QuicTransportStateMachine(
             data.Buffer.Dispose();
         }
 
+        data.Return();
         ops.OnSignalPullOutbound();
     }
 

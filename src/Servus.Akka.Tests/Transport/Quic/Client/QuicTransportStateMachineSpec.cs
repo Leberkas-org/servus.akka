@@ -184,6 +184,39 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void HandlePush_MultiplexedData_should_return_wrapper_to_pool_when_stream_not_found()
+    {
+        var ops = new StubOps();
+        var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
+
+        var buffer = TransportBuffer.Rent(16);
+        buffer.Length = 4;
+        var data = MultiplexedData.Rent(buffer, 999);
+
+        sm.HandlePush(data);
+
+        // Return() clears Buffer to null — verify the wrapper was recycled
+        Assert.Null(data.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandlePush_MultiplexedData_should_return_wrapper_to_pool_when_stream_found()
+    {
+        var ops = new StubOps();
+        var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
+        sm.RegisterTestStream(1, StreamDirection.Bidirectional);
+
+        var buffer = TransportBuffer.Rent(16);
+        buffer.Length = 4;
+        var data = MultiplexedData.Rent(buffer, 1);
+
+        sm.HandlePush(data);
+
+        // Return() clears Buffer to null — verify the wrapper was recycled
+        Assert.Null(data.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
     public void HandleDownstreamFinish_should_not_complete_when_upstream_not_finished()
     {
         var ops = new StubOps();

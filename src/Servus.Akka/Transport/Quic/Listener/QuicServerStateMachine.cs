@@ -144,6 +144,7 @@ internal sealed class QuicServerStateMachine(
             data.Buffer.Dispose();
         }
 
+        data.Return();
         ops.OnSignalPullOutbound();
     }
 

@@ -198,6 +198,13 @@ internal sealed class QuicStreamState : IAsyncDisposable
         return ex =>
         {
             DisposePendingReadBuffer();
+            // QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/RST_STREAM).
+            // Treat it as a graceful completion to avoid propagating a 184B exception object per stream
+            // through the error-handling path when the stream was already being torn down.
+            if (ex is QuicException)
+            {
+                return new PipeStreamReadComplete(null!, _streamId, ReadGen, true);
+            }
             return new PipeStreamReadFailed(ex, _streamId, ReadGen);
         };
     }
@@ -205,6 +212,19 @@ internal sealed class QuicStreamState : IAsyncDisposable
     internal void ActivateWithoutConnection()
     {
         Phase = StreamPhase.Active;
+    }
+
+    /// <summary>
+    /// Test-only: initialises the direct-read transforms on this state without requiring a real
+    /// <see cref="System.Net.Quic.QuicStream"/>. Allows unit tests to invoke
+    /// <see cref="DirectReadTransform"/> and <see cref="FailureReadTransform"/> in isolation.
+    /// </summary>
+    internal void ActivateDirectReadForTest(long streamId)
+    {
+        _streamId = streamId;
+        Phase = StreamPhase.Active;
+        DirectReadTransform = BuildDirectReadTransform(streamId);
+        FailureReadTransform = BuildFailureReadTransform();
     }
 
     public void AttachConnection(Stream stream, long rawStreamId = 0)

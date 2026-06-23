@@ -100,6 +100,38 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void HandlePush_MultiplexedData_should_return_wrapper_to_pool_when_stream_not_found()
+    {
+        var (sm, _) = CreateStateMachine();
+        sm.Start();
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        var data = MultiplexedData.Rent(buffer, 999);
+
+        sm.HandlePush(data);
+
+        // Return() clears Buffer to null — verify the wrapper was recycled
+        Assert.Null(data.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandlePush_MultiplexedData_should_return_wrapper_to_pool_after_buffer_dispose()
+    {
+        // Exercises the else-branch of HandleMultiplexedData (unknown stream): buffer is disposed
+        // and the wrapper must still be returned to the pool (Buffer cleared to null).
+        var (sm, _) = CreateStateMachine();
+        sm.Start();
+
+        var buffer = CreateTestBuffer(4, 5, 6);
+        var data = MultiplexedData.Rent(buffer, 777);
+
+        sm.HandlePush(data);
+
+        // Return() clears Buffer to null — verify the wrapper was recycled
+        Assert.Null(data.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
     public void HandlePush_DisconnectTransport_should_complete_stage()
     {
         var (sm, ops) = CreateStateMachine();

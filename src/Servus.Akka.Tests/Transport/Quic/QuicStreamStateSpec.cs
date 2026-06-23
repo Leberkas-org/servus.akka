@@ -1,3 +1,4 @@
+using System.Net.Quic;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Quic;
 
@@ -329,6 +330,44 @@ public sealed class QuicStreamStateSpec
 
         await state.DisposeAsync();
 
+        Assert.Null(state.PendingReadBuffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void FailureReadTransform_with_QuicException_should_return_PipeStreamReadComplete()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(42);
+
+        var buf = TransportBuffer.Rent(64);
+        buf.Length = 16;
+        state.PendingReadBuffer = buf;
+
+        var quicEx = new QuicException(QuicError.StreamAborted, applicationErrorCode: null, "stream reset by peer");
+        var result = state.FailureReadTransform!(quicEx);
+
+        var complete = Assert.IsType<PipeStreamReadComplete>(result);
+        Assert.Equal(42, complete.StreamId);
+        Assert.True(complete.IsCompleted);
+        Assert.Null(state.PendingReadBuffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void FailureReadTransform_with_non_QuicException_should_return_PipeStreamReadFailed()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(7);
+
+        var buf = TransportBuffer.Rent(64);
+        buf.Length = 16;
+        state.PendingReadBuffer = buf;
+
+        var ioEx = new IOException("network error");
+        var result = state.FailureReadTransform!(ioEx);
+
+        var failed = Assert.IsType<PipeStreamReadFailed>(result);
+        Assert.Equal(7, failed.StreamId);
+        Assert.Same(ioEx, failed.Error);
         Assert.Null(state.PendingReadBuffer);
     }
 
