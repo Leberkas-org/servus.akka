@@ -137,6 +137,7 @@ internal sealed class QuicServerStateMachine(
         if (_streams.TryGetValue(data.StreamId, out var state))
         {
             state.Write(data.Buffer);
+            _ = state.FlushWrites();
         }
         else
         {

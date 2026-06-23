@@ -42,6 +42,8 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
                     {
                         _sm.HandlePush(item);
                     }
+
+                    _sm.FlushBatch();
                 },
                 onUpstreamFinish: () => _sm.HandleUpstreamFinish());
 

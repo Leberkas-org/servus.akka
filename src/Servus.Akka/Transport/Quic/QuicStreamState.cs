@@ -188,6 +188,7 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
             }
 
             _openingBuffer = null;
+            _ = FlushWrites();
         }
 
         if (IsCompleteWritesDeferred)
@@ -263,7 +264,11 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
         data.Memory.Span.CopyTo(mem.Span);
         writer.Advance(data.Length);
         data.Dispose();
-        _ = writer.FlushAsync();
+    }
+
+    public ValueTask<FlushResult> FlushWrites()
+    {
+        return _connection!.OutputWriter.FlushAsync();
     }
 
     private void CompleteWritesInternal()

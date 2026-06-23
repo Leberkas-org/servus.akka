@@ -28,6 +28,7 @@ public sealed class QuicTransportStateMachine(
     private EndPoint? _lastRemoteEndPoint;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
+    private readonly HashSet<StreamTarget> _dirtyStreams = new();
     private int _syncReadBudget = MaxSyncReads;
 
     internal void Dispatch(IQuicTransportEvent evt)
@@ -185,6 +186,7 @@ public sealed class QuicTransportStateMachine(
         if (_streams.TryGetValue(data.StreamId, out var state))
         {
             state.Write(data.Buffer);
+            _dirtyStreams.Add(data.StreamId);
         }
         else
         {
@@ -192,6 +194,24 @@ public sealed class QuicTransportStateMachine(
         }
 
         ops.OnSignalPullOutbound();
+    }
+
+    public void FlushBatch()
+    {
+        if (_dirtyStreams.Count == 0)
+        {
+            return;
+        }
+
+        foreach (var sid in _dirtyStreams)
+        {
+            if (_streams.TryGetValue(sid, out var s))
+            {
+                _ = s.FlushWrites();
+            }
+        }
+
+        _dirtyStreams.Clear();
     }
 
     private void HandleCompleteWrites(StreamTarget streamId)
