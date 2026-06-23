@@ -169,7 +169,7 @@ public sealed class QuicTransportStateMachine(
             return;
         }
 
-        var state = new QuicStreamState(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _pipeOptions);
         _streams[streamId] = state;
 
         var sid = streamId.Value;
@@ -222,7 +222,7 @@ public sealed class QuicTransportStateMachine(
             if (state.Phase == StreamPhase.Closed)
             {
                 _streams.Remove(streamId);
-                _ = state.DisposeAsync();
+                _ = state.DisposeAndReturnAsync();
             }
         }
 
@@ -234,7 +234,7 @@ public sealed class QuicTransportStateMachine(
         if (_streams.Remove(streamId, out var state))
         {
             state.Abort(errorCode);
-            _ = state.DisposeAsync();
+            _ = state.DisposeAndReturnAsync();
             ops.OnPushInbound(new StreamClosed(streamId, DisconnectReason.Error));
         }
 
@@ -290,7 +290,7 @@ public sealed class QuicTransportStateMachine(
         var direction = (rawStreamId & 0x02) != 0
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
-        var state = new QuicStreamState(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _pipeOptions);
         state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
@@ -301,7 +301,7 @@ public sealed class QuicTransportStateMachine(
     internal void RegisterTestStream(long streamId, StreamDirection direction)
     {
         var target = StreamTarget.FromId(streamId);
-        var state = new QuicStreamState(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _pipeOptions);
         state.ActivateWithoutConnection();
         _streams[target] = state;
     }
@@ -416,7 +416,7 @@ public sealed class QuicTransportStateMachine(
             if (state.Phase == StreamPhase.Closed)
             {
                 _streams.Remove(streamId);
-                _ = state.DisposeAsync();
+                _ = state.DisposeAndReturnAsync();
             }
 
             ops.OnPushInbound(new StreamReadCompleted(streamId));
@@ -424,7 +424,7 @@ public sealed class QuicTransportStateMachine(
         else
         {
             _streams.Remove(streamId);
-            _ = state.DisposeAsync();
+            _ = state.DisposeAndReturnAsync();
             ops.OnPushInbound(new StreamClosed(streamId, reason));
         }
     }
@@ -458,7 +458,7 @@ public sealed class QuicTransportStateMachine(
         {
             foreach (var (_, state) in _streams)
             {
-                _ = state.DisposeAsync();
+                _ = state.DisposeAndReturnAsync();
             }
 
             _streams.Clear();
@@ -476,7 +476,7 @@ public sealed class QuicTransportStateMachine(
         foreach (var (target, state) in _streams)
         {
             ops.OnPushInbound(new StreamClosed(target, reason));
-            _ = state.DisposeAsync();
+            _ = state.DisposeAndReturnAsync();
         }
 
         _streams.Clear();
@@ -611,7 +611,7 @@ public sealed class QuicTransportStateMachine(
 
         foreach (var (_, state) in _streams)
         {
-            _ = state.DisposeAsync();
+            _ = state.DisposeAndReturnAsync();
         }
 
         _streams.Clear();

@@ -8,7 +8,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void New_state_should_be_Opening()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         Assert.Equal(StreamPhase.Opening, state.Phase);
         Assert.Null(state.InputReader);
     }
@@ -16,7 +16,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void Write_in_Opening_should_buffer()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         var buf = TransportBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0x01;
         buf.FullMemory.Span[1] = 0x02;
@@ -31,7 +31,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void CompleteWrites_in_Opening_should_defer()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.CompleteWrites();
 
         Assert.Equal(StreamPhase.Opening, state.Phase);
@@ -41,7 +41,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void AttachConnection_should_transition_to_Active()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
         state.AttachConnection(new MemoryStream());
 
@@ -52,7 +52,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task AttachConnection_should_flush_pending_writes_to_output_pipe()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         var buf = TransportBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0x01;
         buf.FullMemory.Span[1] = 0x02;
@@ -78,7 +78,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void AttachConnection_with_deferred_CompleteWrites_should_transition_to_HalfClosedWrite()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.CompleteWrites();
 
         state.AttachConnection(new MemoryStream());
@@ -89,7 +89,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void CompleteWrites_in_Active_should_transition_to_HalfClosedWrite()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
         state.CompleteWrites();
@@ -100,7 +100,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void OnReadCompleted_in_HalfClosedWrite_should_transition_to_Closed()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
         state.CompleteWrites();
 
@@ -112,7 +112,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void OnReadCompleted_in_Active_should_transition_to_HalfClosedRead()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
         state.OnReadCompleted();
@@ -123,7 +123,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void CompleteWrites_in_HalfClosedRead_should_transition_to_Closed()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
         state.OnReadCompleted();
 
@@ -135,7 +135,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void Abort_should_transition_to_Closed()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
         state.Abort(0);
@@ -146,7 +146,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void Abort_in_Opening_should_transition_to_Closed()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
         state.Abort(0);
 
@@ -156,7 +156,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task DisposeAsync_should_dispose_pending_writes_and_connection()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         var buf = TransportBuffer.Rent(2);
         buf.Length = 2;
         state.Write(buf);
@@ -171,7 +171,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task DisposeAsync_after_attach_should_dispose_connection()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
         await state.DisposeAsync();
@@ -183,7 +183,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task Multiple_buffered_writes_should_all_be_flushed()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
         for (byte i = 1; i <= 3; i++)
         {
@@ -209,7 +209,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task Write_in_Active_should_write_to_output_pipe()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         var stream = new MemoryStream();
         state.AttachConnection(stream);
 
@@ -232,17 +232,17 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void Direction_should_return_construction_value()
     {
-        var stateBi = new QuicStreamState(StreamDirection.Bidirectional);
+        var stateBi = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         Assert.Equal(StreamDirection.Bidirectional, stateBi.Direction);
 
-        var stateUni = new QuicStreamState(StreamDirection.Unidirectional);
+        var stateUni = QuicStreamState.Rent(StreamDirection.Unidirectional, null);
         Assert.Equal(StreamDirection.Unidirectional, stateUni.Direction);
     }
 
     [Fact(Timeout = 5000)]
     public async Task AttachConnection_with_deferred_writes_and_deferred_CompleteWrites()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
         var buf1 = TransportBuffer.Rent(1);
         buf1.FullMemory.Span[0] = 0x11;
@@ -271,7 +271,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void CompleteWrites_in_HalfClosedWrite_should_be_no_op()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
         state.CompleteWrites();
 
@@ -285,7 +285,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void OnReadCompleted_in_HalfClosedRead_should_stay_in_HalfClosedRead()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
         state.OnReadCompleted();
 
@@ -299,7 +299,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void Write_during_opening_buffers_the_payload()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         Assert.Equal(0, state.PendingWriteCount);
         state.Write(new byte[] { 1, 2, 3 });
         Assert.Equal(1, state.PendingWriteCount);
@@ -308,7 +308,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public void AttachConnection_with_QuicStream_should_set_DirectReadTransform()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
         // MemoryStream is not a QuicStream, so DirectReadTransform stays null
         state.AttachConnection(new MemoryStream());
@@ -320,7 +320,7 @@ public sealed class QuicStreamStateSpec
     [Fact(Timeout = 5000)]
     public async Task DisposeAsync_should_dispose_pending_read_buffer()
     {
-        var state = new QuicStreamState(StreamDirection.Bidirectional);
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
         var buf = TransportBuffer.Rent(64);

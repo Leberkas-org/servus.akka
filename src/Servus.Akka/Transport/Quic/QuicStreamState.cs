@@ -14,17 +14,21 @@ internal enum StreamPhase
     Closed
 }
 
-internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConnectionOptions? pipeOptions = null) : IAsyncDisposable
+internal sealed class QuicStreamState : IAsyncDisposable
 {
+    private static readonly ObjectPool<QuicStreamState> Pool = new(256);
+
     private SocketPipeConnection? _connection;
     private Stream? _stream;
     private Queue<TransportBuffer>? _openingBuffer;
     private Task? _drainTask;
     private PipeReader? _cachedReader;
     private long _streamId;
+    private StreamDirection _direction;
+    private SocketPipeConnectionOptions? _pipeOptions;
 
-    public StreamPhase Phase { get; private set; } = StreamPhase.Opening;
-    public StreamDirection Direction { get; } = direction;
+    public StreamPhase Phase { get; private set; }
+    public StreamDirection Direction => _direction;
     public int PendingWriteCount => _openingBuffer?.Count ?? 0;
     public bool IsCompleteWritesDeferred { get; private set; }
     public PipeReader? InputReader => _connection?.InputReader;
@@ -100,6 +104,47 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
         _shrinkCount = 0;
     }
 
+    public static QuicStreamState Rent(StreamDirection direction, SocketPipeConnectionOptions? pipeOptions)
+    {
+        if (!Pool.TryRent(out var state))
+        {
+            state = new QuicStreamState();
+        }
+
+        state._direction = direction;
+        state._pipeOptions = pipeOptions;
+        state.Phase = StreamPhase.Opening;
+        return state;
+    }
+
+    // Called after DisposeAsync() has already cleaned up unmanaged resources.
+    // Clears reference fields so the pooled object doesn't retain stale closures.
+    private void ResetAfterDispose()
+    {
+        _pendingReadBuffer = null;
+        _openingBuffer = null;
+        _connection = null;
+        _stream = null;
+        _drainTask = null;
+        _cachedReader = null;
+        _streamId = 0;
+        _direction = default;
+        _pipeOptions = null;
+        DirectReadTransform = null!;
+        ReadSuccessTransform = null!;
+        FailureReadTransform = null;
+        IsCompleteWritesDeferred = false;
+        Phase = StreamPhase.Opening;
+        ResetReadHint();
+    }
+
+    public async ValueTask DisposeAndReturnAsync()
+    {
+        await DisposeAsync().ConfigureAwait(false);
+        ResetAfterDispose();
+        Pool.Return(this);
+    }
+
     internal TransportBuffer? PendingReadBuffer
     {
         get => _pendingReadBuffer;
@@ -169,13 +214,13 @@ internal sealed class QuicStreamState(StreamDirection direction, SocketPipeConne
 
         if (stream is QuicStream qs)
         {
-            _connection = SocketPipeConnection.CreateForQuic(qs, pipeOptions);
+            _connection = SocketPipeConnection.CreateForQuic(qs, _pipeOptions);
             DirectReadTransform = BuildDirectReadTransform(rawStreamId);
             FailureReadTransform = BuildFailureReadTransform();
         }
         else
         {
-            _connection = SocketPipeConnection.Create(stream, pipeOptions);
+            _connection = SocketPipeConnection.Create(stream, _pipeOptions);
             _cachedReader = _connection.InputReader;
             ReadSuccessTransform = BuildReadSuccessTransform(rawStreamId);
         }
