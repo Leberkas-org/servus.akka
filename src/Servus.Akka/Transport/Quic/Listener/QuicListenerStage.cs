@@ -121,6 +121,8 @@ internal sealed class QuicListenerStage
                 ApplicationProtocols = opts.ApplicationProtocols,
                 ConnectionOptionsCallback = (_, _, _) =>
                 {
+                    var clientCertRequired = opts.ClientCertificateMode is ClientCertificateMode.RequireCertificate
+                        or ClientCertificateMode.AllowCertificate;
                     var serverOptions = new QuicServerConnectionOptions
                     {
                         DefaultStreamErrorCode = 0x0100,
@@ -128,11 +130,13 @@ internal sealed class QuicListenerStage
                         MaxInboundBidirectionalStreams = opts.MaxInboundBidirectionalStreams,
                         MaxInboundUnidirectionalStreams = opts.MaxInboundUnidirectionalStreams,
                         IdleTimeout = opts.IdleTimeout,
+                        HandshakeTimeout = opts.HandshakeTimeout,
                         ServerAuthenticationOptions = new SslServerAuthenticationOptions
                         {
                             ServerCertificate = opts.ServerCertificate,
                             ApplicationProtocols = opts.ApplicationProtocols,
                             EnabledSslProtocols = opts.EnabledSslProtocols,
+                            ClientCertificateRequired = clientCertRequired,
                             RemoteCertificateValidationCallback = opts.ClientCertificateValidationCallback
                         }
                     };

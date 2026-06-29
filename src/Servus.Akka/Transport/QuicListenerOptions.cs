@@ -13,4 +13,6 @@ public sealed record QuicListenerOptions : ListenerOptions
     public required List<SslApplicationProtocol> ApplicationProtocols { get; init; }
     public SslProtocols EnabledSslProtocols { get; init; } = SslProtocols.None;
     public RemoteCertificateValidationCallback? ClientCertificateValidationCallback { get; init; }
+    public TimeSpan HandshakeTimeout { get; init; } = TimeSpan.FromSeconds(10);
+    public ClientCertificateMode ClientCertificateMode { get; init; } = ClientCertificateMode.NoCertificate;
 }
