@@ -9,7 +9,7 @@ public static class TestConnectionStageExtensions
         => stage.PushInbound(TransportData.Rent(data));
 
     public static void PushData(this TestConnectionStage stage, string text)
-        => stage.PushInbound(TransportData.Rent( UTF8.GetBytes(text)));
+        => stage.PushInbound(TransportData.Rent(UTF8.GetBytes(text)));
 
     public static void PushDisconnected(this TestConnectionStage stage,
         DisconnectReason reason = DisconnectReason.Graceful)

@@ -25,7 +25,7 @@ public class ActorRefServiceProvider(IServiceProvider inner) : IServiceProvider
     {
         // check if constructor is already in cache
         if (_constructorInfos.TryGetValue(type, out var constructor)) return constructor.Invoke([registry]);
-        
+
         // create default ctor
         var genericType = typeof(ActorRef<>).MakeGenericType(type.GenericTypeArguments.First());
         constructor = genericType.GetConstructor([typeof(IActorRegistry)]);

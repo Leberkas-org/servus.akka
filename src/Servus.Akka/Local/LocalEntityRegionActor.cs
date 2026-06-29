@@ -77,7 +77,7 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
 
     private void BecomeReady()
     {
-        
+
         Become(() =>
         {
             Receive<PassivationTick>(_ => RunPassivation());
@@ -85,7 +85,7 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
             Receive<Status.Failure>(f => _log.Error(f.Cause, "Entity store operation failed"));
             Receive<object>(RouteMessage);
         });
-        
+
         Stash.UnstashAll();
         SchedulePassivation();
     }
@@ -124,8 +124,8 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
 
     private IActorRef SpawnEntity(string entityId, bool persist = true)
     {
-        if(persist) _entityIdStore.EntityStarted(entityId).PipeTo(Self);
-        
+        if (persist) _entityIdStore.EntityStarted(entityId).PipeTo(Self);
+
         var props = _entityPropsFactory(entityId);
         var child = Context.ActorOf(props, entityId);
         Context.Watch(child);

@@ -50,7 +50,7 @@ public static class SseFormatterFlow
     {
         prefix.CopyTo(dest);
         var written = prefix.Length;
-        written +=  System.Text.Encoding.UTF8.GetBytes(value, dest[written..]);
+        written += System.Text.Encoding.UTF8.GetBytes(value, dest[written..]);
         dest[written++] = Lf;
         return written;
     }

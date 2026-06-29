@@ -70,7 +70,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
     private int _shrinkCount;
 
     public int ReadHint { get; private set; } = 4 * 1024;
-    
+
     internal TransportBuffer? PendingReadBuffer { get; set; }
 
     public void AdaptReadHint(int bytesRead)

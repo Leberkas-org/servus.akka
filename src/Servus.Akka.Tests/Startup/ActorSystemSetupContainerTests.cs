@@ -13,7 +13,7 @@ public class ActorSystemSetupContainerTests
     {
         ActorSystem? capturesSystem = null;
         var semaphore = new SemaphoreSlim(0, 1);
-        
+
         var cts = new CancellationTokenSource();
         var app = AppBuilder
             .Create()
@@ -27,7 +27,7 @@ public class ActorSystemSetupContainerTests
 
         await app.StartAsync(cts.Token);
         await semaphore.WaitAsync(cts.Token);
-        
+
         Assert.NotNull(capturesSystem);
         Assert.Equal("test-system", capturesSystem.Name);
     }

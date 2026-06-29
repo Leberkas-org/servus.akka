@@ -5,7 +5,7 @@ using Akka.Hosting.TestKit;
 
 namespace Servus.Akka.Tests;
 
-public class ResolveExtensionTests :  TestKit
+public class ResolveExtensionTests : TestKit
 {
     protected override void ConfigureAkka(AkkaConfigurationBuilder builder, IServiceProvider provider)
     {

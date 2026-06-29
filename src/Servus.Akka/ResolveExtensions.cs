@@ -12,7 +12,7 @@ public static class ResolveExtensions
         var props = resolver.Props<TActor>(args);
         return factory.ActorOf(props, name);
     }
-    
+
     public static IActorRef ResolveChildActor<TActor>(this IActorContext context, string? name, params object[] args)
         where TActor : ActorBase
     {
@@ -23,19 +23,19 @@ public static class ResolveExtensions
     public static IActorRef ResolveChildActor<TActor>(this IActorContext context, params object[] args)
         where TActor : ActorBase
         => ResolveChildActor<TActor>(context, null, args);
-    
+
     public static IActorRef ResolveActor<TActor>(this IActorContext context, string? name, params object[] args)
         where TActor : ActorBase
         => context.System.ResolveActor<TActor>(name, args);
-    
+
     public static IActorRef ResolveActor<TActor>(this IActorContext context, params object[] args)
         where TActor : ActorBase
         => context.System.ResolveActor<TActor>(args);
-    
+
     public static IActorRef ResolveActor<TActor>(this ActorSystem system, params object[] args)
         where TActor : ActorBase
         => ResolveActor<TActor>(system, null, args);
-    
+
     public static IActorRef ResolveActor<TActor>(this ActorSystem system, string? name, params object[] args)
         where TActor : ActorBase
     {

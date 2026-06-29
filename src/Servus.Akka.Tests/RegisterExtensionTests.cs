@@ -21,7 +21,7 @@ public class RegisterExtensionTests : TestKit
     public void ActorsAreRegistered()
     {
         var registry = Host.Services.GetRequiredService<IActorRegistry>();
-        
+
         Assert.True(registry.TryGet<TestActor1>(out _));
         Assert.True(registry.TryGet<TestActor2>(out _));
         Assert.True(registry.TryGet<TestActor3>(out _));

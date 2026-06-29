@@ -13,6 +13,6 @@ public abstract class ActorSystemSetupContainer : IServiceSetupContainer
     }
 
     protected abstract string GetActorSystemName();
-    
+
     protected abstract void BuildSystem(AkkaConfigurationBuilder builder, IServiceProvider serviceProvider);
 }

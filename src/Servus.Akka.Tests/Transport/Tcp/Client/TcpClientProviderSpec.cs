@@ -13,7 +13,7 @@ public class ClientProviderCollection;
 public sealed class TcpClientProviderSpec
 {
     const string InvalidHostName = "invalid-host-that-does-not-exist-@12345.local";
-    
+
     [Fact(Timeout = 5000)]
     public void TcpClientProvider_should_initialize_with_options()
     {
