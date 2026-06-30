@@ -28,7 +28,7 @@ public sealed class TransportBuffer : IDisposable
 
     public static TransportBuffer Rent(int minimumSize)
     {
-        var owner = MemoryPool<byte>.Shared.Rent(minimumSize);
+        var owner = PooledArrayMemoryOwner.Create(minimumSize);
         if (!Pool.TryRent(out var buf))
         {
             return new TransportBuffer { _owner = owner };
