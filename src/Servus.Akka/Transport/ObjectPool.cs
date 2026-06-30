@@ -1,14 +1,9 @@
 namespace Servus.Akka.Transport;
 
-public sealed class ObjectPool<T> where T : class
+public sealed class ObjectPool<T>(int size) where T : class
 {
     private T? _fastItem;
-    private readonly T?[] _items;
-
-    public ObjectPool(int size)
-    {
-        _items = new T?[size];
-    }
+    private readonly T?[] _items = new T?[size];
 
     public bool TryRent(out T item)
     {
@@ -30,7 +25,7 @@ public sealed class ObjectPool<T> where T : class
             }
         }
 
-        item = default!;
+        item = null!;
         return false;
     }
 
