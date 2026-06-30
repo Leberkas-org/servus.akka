@@ -69,12 +69,12 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var ioQueue = IOQueue.GetNext();
 
         var fallbackReader = PipeReader.Create(stream, new StreamPipeReaderOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             bufferSize: opts.MinimumSegmentSize,
             leaveOpen: true));
 
         var outputPipe = new Pipe(new PipeOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             readerScheduler: ioQueue,
             writerScheduler: PipeScheduler.ThreadPool,
             minimumSegmentSize: opts.MinimumSegmentSize,
@@ -101,7 +101,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var ioQueue = IOQueue.GetNext();
 
         var inputPipe = new Pipe(new PipeOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             readerScheduler: PipeScheduler.ThreadPool,
             writerScheduler: ioQueue,
             minimumSegmentSize: opts.MinimumSegmentSize,
@@ -110,7 +110,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
             useSynchronizationContext: false));
 
         var outputPipe = new Pipe(new PipeOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             readerScheduler: ioQueue,
             writerScheduler: PipeScheduler.ThreadPool,
             minimumSegmentSize: opts.MinimumSegmentSize,
@@ -141,7 +141,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var ioQueue = IOQueue.GetNext();
 
         var inputPipe = new Pipe(new PipeOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             readerScheduler: PipeScheduler.ThreadPool,
             writerScheduler: ioQueue,
             minimumSegmentSize: opts.MinimumSegmentSize,
@@ -150,7 +150,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
             useSynchronizationContext: false));
 
         var outputPipe = new Pipe(new PipeOptions(
-            pool: MemoryPool<byte>.Shared,
+            pool: CrossThreadMemoryPool.Instance,
             readerScheduler: ioQueue,
             writerScheduler: PipeScheduler.ThreadPool,
             minimumSegmentSize: opts.MinimumSegmentSize,
