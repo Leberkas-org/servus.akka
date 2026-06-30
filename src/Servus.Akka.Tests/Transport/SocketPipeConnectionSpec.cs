@@ -157,6 +157,51 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task OutputWriter_should_send_large_multisegment_payload_intact()
+    {
+        // A payload many times the pipe's MinimumSegmentSize forces the output pipe to span multiple
+        // segments, exercising the send loop's multi-segment coalescing branch. Guards that the
+        // coalesced bytes are written byte-for-byte regardless of which buffer pool backs the copy.
+        var memStream = new MemoryStream();
+        var connection = SocketPipeConnection.Create(memStream);
+
+        var payload = new byte[256 * 1024];
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i * 31 + 7);
+        }
+
+        await connection.OutputWriter.WriteAsync(payload, TestContext.Current.CancellationToken);
+        await connection.CompleteAndDrainOutputAsync();
+
+        Assert.Equal(payload, memStream.ToArray());
+
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task CompleteAndDrainOutputAsync_should_send_large_multisegment_payload_intact()
+    {
+        // A payload many times the 16 KiB minimum segment size forces the output pipe to span
+        // multiple buffer segments, exercising the send loop's multi-segment coalescing path.
+        var memStream = new MemoryStream();
+        var connection = SocketPipeConnection.Create(memStream);
+
+        var payload = new byte[256 * 1024];
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i % 251);
+        }
+
+        await connection.OutputWriter.WriteAsync(payload, TestContext.Current.CancellationToken);
+        await connection.CompleteAndDrainOutputAsync();
+
+        Assert.Equal(payload, memStream.ToArray());
+
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task CompleteAndDrainOutputAsync_with_no_data_should_complete_without_error()
     {
         var memStream = new MemoryStream();

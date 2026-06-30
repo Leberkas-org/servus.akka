@@ -360,13 +360,15 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
                 else
                 {
-                    // Coalesce all segments into one ArrayPool buffer so that TLS (SslStream)
-                    // produces a single record + one kernel send instead of N syscalls per segment.
+                    // Coalesce all segments into one buffer so that TLS (SslStream) produces a single
+                    // record + one kernel send instead of N syscalls per segment. Rent from the bounded
+                    // cross-thread pool, NOT ArrayPool<byte>.Shared: the per-core Shared pool thrashes
+                    // and allocates fresh arrays under the transport's concurrent send load.
                     var length = (int)buffer.Length;
-                    var rented = ArrayPool<byte>.Shared.Rent(length);
-                    buffer.CopyTo(rented);
-                    await stream.WriteAsync(rented.AsMemory(0, length), ct);
-                    ArrayPool<byte>.Shared.Return(rented);
+                    using var owner = PooledArrayMemoryOwner.Create(length);
+                    var mem = owner.Memory[..length];
+                    buffer.CopyTo(mem.Span);
+                    await stream.WriteAsync(mem, ct);
                 }
 
                 await stream.FlushAsync(ct);
@@ -420,11 +422,14 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 }
                 else
                 {
+                    // Cross-thread pool, not ArrayPool<byte>.Shared: under concurrent QUIC stream sends
+                    // the per-core Shared pool misses constantly and allocates fresh byte[] (the bulk of
+                    // the H3 upload allocation). The bounded shared pool absorbs the churn.
                     var length = (int)buffer.Length;
-                    var rented = ArrayPool<byte>.Shared.Rent(length);
-                    buffer.CopyTo(rented);
-                    await stream.WriteAsync(rented.AsMemory(0, length), ct);
-                    ArrayPool<byte>.Shared.Return(rented);
+                    using var owner = PooledArrayMemoryOwner.Create(length);
+                    var mem = owner.Memory[..length];
+                    buffer.CopyTo(mem.Span);
+                    await stream.WriteAsync(mem, ct);
                 }
 
                 await stream.FlushAsync(ct);
