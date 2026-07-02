@@ -27,22 +27,27 @@ public sealed class PooledArrayMemoryOwner : IMemoryOwner<byte>
     public static readonly ArrayPool<byte> SharedPool =
         ArrayPool<byte>.Create(maxArrayLength: 1024 * 1024, maxArraysPerBucket: 1024);
 
-    private readonly ArrayPool<byte> _pool;
-    private byte[]? _array;
+    private static readonly ObjectPool<PooledArrayMemoryOwner> WrapperPool = new(Environment.ProcessorCount * 8);
 
-    private PooledArrayMemoryOwner(ArrayPool<byte> pool, int minimumLength)
-    {
-        _pool = pool;
-        _array = pool.Rent(minimumLength);
-    }
+    private ArrayPool<byte> _pool = null!;
+    private byte[]? _array;
 
     /// <summary>Rents from the shared cross-thread <see cref="SharedPool"/>.</summary>
     public static PooledArrayMemoryOwner Create(int minimumLength)
-        => new(SharedPool, minimumLength);
+        => Create(SharedPool, minimumLength);
 
     /// <summary>Rents from a caller-supplied pool (e.g. a test or a dedicated per-subsystem pool).</summary>
     public static PooledArrayMemoryOwner Create(ArrayPool<byte> pool, int minimumLength)
-        => new(pool, minimumLength);
+    {
+        if (!WrapperPool.TryRent(out var owner))
+        {
+            owner = new PooledArrayMemoryOwner();
+        }
+
+        owner._pool = pool;
+        owner._array = pool.Rent(minimumLength);
+        return owner;
+    }
 
     public Memory<byte> Memory
         => _array ?? throw new ObjectDisposedException(nameof(PooledArrayMemoryOwner));
@@ -53,6 +58,7 @@ public sealed class PooledArrayMemoryOwner : IMemoryOwner<byte>
         if (array is not null)
         {
             _pool.Return(array);
+            WrapperPool.Return(this);
         }
     }
 }
