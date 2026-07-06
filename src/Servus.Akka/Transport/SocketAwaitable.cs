@@ -89,6 +89,104 @@ internal sealed class SocketAwaitable()
         return new ValueTask<int>(BytesTransferred);
     }
 
+    // Vectored send over a list of owned WireBuffers: hands the whole batch to the kernel as a single
+    // scatter-gather writev. SAEA does NOT guarantee a full transfer, so this loops on BytesTransferred
+    // and rebuilds the segment list from the unsent tail until every byte is written, returning the
+    // batch's total byte count.
+    public async ValueTask<int> SendManyAsync(Socket socket, IReadOnlyList<WireBuffer> buffers)
+    {
+        var total = 0;
+        for (var i = 0; i < buffers.Count; i++)
+        {
+            total += buffers[i].Length;
+        }
+
+        var remaining = total;
+        var startIndex = 0;
+        var startOffset = 0;
+
+        while (remaining > 0)
+        {
+            FillBufferList(buffers, startIndex, startOffset);
+
+            _core.Reset();
+            int transferred;
+            if (socket.SendAsync(this))
+            {
+                transferred = await new ValueTask<int>(this, _core.Version);
+            }
+            else if (SocketError != SocketError.Success)
+            {
+                throw new SocketException((int)SocketError);
+            }
+            else
+            {
+                transferred = BytesTransferred;
+            }
+
+            remaining -= transferred;
+            if (remaining <= 0)
+            {
+                break;
+            }
+
+            // Advance the (index, offset) cursor past the bytes that were actually sent so the next
+            // pass re-issues only the unsent tail.
+            var advance = transferred;
+            while (advance > 0)
+            {
+                var available = buffers[startIndex].Length - startOffset;
+                if (advance < available)
+                {
+                    startOffset += advance;
+                    advance = 0;
+                }
+                else
+                {
+                    advance -= available;
+                    startIndex++;
+                    startOffset = 0;
+                }
+            }
+        }
+
+        return total;
+    }
+
+    private void FillBufferList(IReadOnlyList<WireBuffer> buffers, int startIndex, int startOffset)
+    {
+        var list = _bufferList ??= new List<ArraySegment<byte>>();
+        list.Clear();
+
+        for (var i = startIndex; i < buffers.Count; i++)
+        {
+            var buffer = buffers[i];
+            if (buffer.Length == 0)
+            {
+                continue;
+            }
+
+            if (!MemoryMarshal.TryGetArray<byte>(buffer.Memory, out var array))
+            {
+                throw new InvalidOperationException("Send buffer segment is not backed by an array.");
+            }
+
+            if (i == startIndex && startOffset > 0)
+            {
+                list.Add(new ArraySegment<byte>(array.Array!, array.Offset + startOffset, array.Count - startOffset));
+            }
+            else
+            {
+                list.Add(array);
+            }
+        }
+
+        // SocketAsyncEventArgs forbids Buffer and BufferList being set at once; clear any single buffer
+        // left by a prior send before assigning the gather list.
+        SetBuffer(null, 0, 0);
+        BufferList = list;
+    }
+
     private void SetBufferList(in ReadOnlySequence<byte> buffers)
     {
         var list = _bufferList ??= new List<ArraySegment<byte>>();
