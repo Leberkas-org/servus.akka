@@ -26,7 +26,7 @@ public sealed class ConnectionLeaseSpec
     {
         var lease = CreateLease();
 
-        Assert.NotNull(lease.InputReader);
+        Assert.NotNull(lease.OutputWriter);
     }
 
     [Fact(Timeout = 5000)]

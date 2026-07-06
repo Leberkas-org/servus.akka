@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.IO.Pipelines;
 using System.Net.Security;
 using System.Net.Sockets;
 using Akka.Actor;
@@ -20,7 +18,6 @@ internal sealed class TcpServerStateMachine(
     private const int MaxSyncReads = 8;
 
     private SocketPipeConnection? _connection;
-    private SequencePosition? _pendingAdvance;
     private int _connectionGen;
     private bool _upstreamFinished;
     private int _syncReadBudget = MaxSyncReads;
@@ -51,17 +48,23 @@ internal sealed class TcpServerStateMachine(
     {
         switch (evt)
         {
-            case PipeReadComplete e:
+            case ReadCompleted e:
                 if (e.Gen == _connectionGen)
                 {
-                    OnPipeReadComplete(e.Result);
+                    OnReadCompleted(e.Buffer);
+                }
+                else
+                {
+                    // Stale read from a torn-down connection: the buffer is OWNED by this event
+                    // (rent-and-receive) — dropping it without dispose leaks the pooled array.
+                    e.Buffer?.Dispose();
                 }
 
                 break;
-            case PipeReadFailed e:
+            case ReadFailed e:
                 if (e.Gen == _connectionGen)
                 {
-                    OnPipeReadFailed(e.Error);
+                    OnReadFailed(e.Error);
                 }
 
                 break;
@@ -116,26 +119,20 @@ internal sealed class TcpServerStateMachine(
             return;
         }
 
-        if (_pendingAdvance is { } pos)
-        {
-            _pendingAdvance = null;
-            _connection.InputReader.AdvanceTo(pos);
-        }
-
         var gen = _connectionGen;
-        var readTask = _connection.InputReader.ReadAsync();
+        var readTask = _connection.ReceiveAsync();
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
         {
             _syncReadBudget--;
-            OnPipeReadComplete(readTask.Result);
+            OnReadCompleted(readTask.Result);
             return;
         }
 
         _syncReadBudget = MaxSyncReads;
         readTask.PipeTo(self,
-            success: result => new PipeReadComplete(result, gen),
-            failure: ex => new PipeReadFailed(ex, gen));
+            success: buffer => new ReadCompleted(buffer, gen),
+            failure: ex => new ReadFailed(ex, gen));
     }
 
     private void HandleTransportData(TransportData data)
@@ -169,27 +166,20 @@ internal sealed class TcpServerStateMachine(
         }
     }
 
-    private void OnPipeReadComplete(ReadResult result)
+    private void OnReadCompleted(TransportBuffer? buffer)
     {
-        if (result.Buffer.Length > 0)
-        {
-            var length = (int)result.Buffer.Length;
-            var buf = TransportBuffer.Rent(length);
-            result.Buffer.CopyTo(buf.FullMemory.Span);
-            buf.Length = length;
-            _pendingAdvance = result.Buffer.End;
-            ops.OnPushInbound(TransportData.Rent(buf));
-        }
-
-        if (result.IsCompleted || result.IsCanceled)
+        if (buffer is null)
         {
             OnInboundComplete(DisconnectReason.Graceful);
+            return;
         }
+
+        ops.OnPushInbound(TransportData.Rent(buffer));
     }
 
-    private void OnPipeReadFailed(Exception ex)
+    private void OnReadFailed(Exception ex)
     {
-        Tracing.For("Connection").Warning(this, "Server pipe read failed: {0}", ex.Message);
+        Tracing.For("Connection").Warning(this, "Server read failed: {0}", ex.Message);
         OnInboundComplete(DisconnectReason.Error);
     }
 

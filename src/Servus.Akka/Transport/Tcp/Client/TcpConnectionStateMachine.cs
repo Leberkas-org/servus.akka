@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.IO.Pipelines;
 using Akka.Actor;
 using static Servus.Senf;
@@ -24,7 +23,6 @@ public sealed class TcpConnectionStateMachine(
     private bool _needsFlush;
     private bool _flushInProgress;
 
-    private SequencePosition? _pendingAdvance;
     private bool _readInProgress;
     private int _syncReadBudget = MaxSyncReads;
     private bool _upstreamFinished;
@@ -44,19 +42,25 @@ public sealed class TcpConnectionStateMachine(
             case AcquisitionFailed e:
                 OnAcquisitionFailed(e.Error);
                 break;
-            case PipeReadComplete e:
+            case ReadCompleted e:
                 _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
-                    OnPipeReadComplete(e.Result);
+                    OnReadCompleted(e.Buffer);
+                }
+                else
+                {
+                    // Stale read from a torn-down/reconnected lease: the buffer is OWNED by this
+                    // event (rent-and-receive) — dispose or it leaks the pooled array.
+                    e.Buffer?.Dispose();
                 }
 
                 break;
-            case PipeReadFailed e:
+            case ReadFailed e:
                 _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
-                    OnPipeReadFailed(e.Error);
+                    OnReadFailed(e.Error);
                 }
 
                 break;
@@ -148,27 +152,21 @@ public sealed class TcpConnectionStateMachine(
 
         _readInProgress = true;
 
-        if (_pendingAdvance is { } pos)
-        {
-            _pendingAdvance = null;
-            connection.InputReader.AdvanceTo(pos);
-        }
-
         var gen = _connectionGen;
-        var readTask = connection.InputReader.ReadAsync();
+        var readTask = connection.ReceiveAsync();
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
         {
             _syncReadBudget--;
             _readInProgress = false;
-            OnPipeReadComplete(readTask.Result);
+            OnReadCompleted(readTask.Result);
             return;
         }
 
         _syncReadBudget = MaxSyncReads;
         readTask.PipeTo(self,
-            success: result => new PipeReadComplete(result, gen),
-            failure: ex => new PipeReadFailed(ex, gen));
+            success: buffer => new ReadCompleted(buffer, gen),
+            failure: ex => new ReadFailed(ex, gen));
     }
 
     private void HandleConnectTransport(ConnectTransport connect)
@@ -271,27 +269,20 @@ public sealed class TcpConnectionStateMachine(
         ops.OnSignalPullOutbound();
     }
 
-    private void OnPipeReadComplete(ReadResult result)
+    private void OnReadCompleted(TransportBuffer? buffer)
     {
-        if (result.Buffer.Length > 0)
-        {
-            var length = (int)result.Buffer.Length;
-            var buf = TransportBuffer.Rent(length);
-            result.Buffer.CopyTo(buf.FullMemory.Span);
-            buf.Length = length;
-            _pendingAdvance = result.Buffer.End;
-            ops.OnPushInbound(TransportData.Rent(buf));
-        }
-
-        if (result.IsCompleted || result.IsCanceled)
+        if (buffer is null)
         {
             OnInboundComplete(DisconnectReason.Graceful);
+            return;
         }
+
+        ops.OnPushInbound(TransportData.Rent(buffer));
     }
 
-    private void OnPipeReadFailed(Exception ex)
+    private void OnReadFailed(Exception ex)
     {
-        Tracing.For("Connection").Warning(this, "Pipe read failed: {0}", ex.Message);
+        Tracing.For("Connection").Warning(this, "Read failed: {0}", ex.Message);
         OnInboundComplete(DisconnectReason.Error);
     }
 
@@ -375,7 +366,6 @@ public sealed class TcpConnectionStateMachine(
     private void CleanupTransport()
     {
         _connectionGen++;
-        _pendingAdvance = null;
         _readInProgress = false;
 
         _acquireCts?.Cancel();

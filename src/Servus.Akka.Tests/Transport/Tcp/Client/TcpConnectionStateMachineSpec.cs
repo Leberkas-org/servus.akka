@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
@@ -352,53 +351,44 @@ public sealed class TcpConnectionStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_stale_gen_should_be_ignored()
+    public void Dispatch_ReadCompleted_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         var lease = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease));
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 999));
-
-        Assert.Empty(ops.PushedInbound);
-
-        pipe.Reader.AdvanceTo(readResult.Buffer.End);
-        pipe.Writer.Complete();
-        pipe.Reader.Complete();
-    }
-
-    [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadFailed_stale_gen_should_be_ignored()
-    {
-        var (sm, ops) = CreateStateMachine();
-        var lease = CreateTestLease();
-        sm.Dispatch(new LeaseAcquired(lease));
-        ops.PushedInbound.Clear();
-
-        sm.Dispatch(new PipeReadFailed(new IOException("pipe error"), 999));
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(buffer, 999));
 
         Assert.Empty(ops.PushedInbound);
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_with_data_should_push_lease()
+    public void Dispatch_ReadFailed_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         var lease = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease));
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 999));
+
+        Assert.Empty(ops.PushedInbound);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_with_data_should_push_lease()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease();
+        sm.Dispatch(new LeaseAcquired(lease));
+        ops.PushedInbound.Clear();
+
+        var buffer = CreateTestBuffer(1, 2, 3);
         var gen = 1;
 
-        sm.Dispatch(new PipeReadComplete(readResult, gen));
+        sm.Dispatch(new ReadCompleted(buffer, gen));
 
         Assert.Single(ops.PushedInbound);
         var pushed = ops.PushedInbound[0];
@@ -406,38 +396,30 @@ public sealed class TcpConnectionStateMachineSpec
         Assert.Equal(3, transportData.Buffer.Length);
 
         transportData.Buffer.Dispose();
-        pipe.Writer.Complete();
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_completed_should_push_disconnected()
+    public void Dispatch_ReadCompleted_completed_should_push_disconnected()
     {
         var (sm, ops) = CreateStateMachine();
         var lease = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease));
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        pipe.Writer.Complete();
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 1));
+        sm.Dispatch(new ReadCompleted(null, 1));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Graceful });
-
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadFailed_should_push_disconnected_error()
+    public void Dispatch_ReadFailed_should_push_disconnected_error()
     {
         var (sm, ops) = CreateStateMachine();
         var lease = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease));
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeReadFailed(new IOException("read error"), 1));
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 1));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Error });
     }
@@ -545,12 +527,12 @@ public sealed class TcpConnectionStateMachineSpec
 
         // Stale gen events should be silently ignored after completion
         ops.PushedInbound.Clear();
-        sm.Dispatch(new PipeReadFailed(new IOException("stale"), 1));
+        sm.Dispatch(new ReadFailed(new IOException("stale"), 1));
         Assert.Empty(ops.PushedInbound);
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadFailed_without_upstream_finished_should_signal_pull()
+    public void Dispatch_ReadFailed_without_upstream_finished_should_signal_pull()
     {
         var (sm, ops) = CreateStateMachine();
         var lease = CreateTestLease();
@@ -558,14 +540,14 @@ public sealed class TcpConnectionStateMachineSpec
         ops.PushedInbound.Clear();
         var pullBefore = ops.PullOutboundCount;
 
-        sm.Dispatch(new PipeReadFailed(new IOException("read error"), 1));
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 1));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Error });
         Assert.True(ops.PullOutboundCount > pullBefore);
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_InboundComplete_with_auto_reconnect_should_push_transient_disconnect()
+    public void Dispatch_InboundComplete_with_auto_reconnect_should_push_transient_disconnect()
     {
         var ops = new MockConnectionOperations();
         var sm = new TcpConnectionStateMachine(
@@ -577,20 +559,14 @@ public sealed class TcpConnectionStateMachineSpec
         sm.Dispatch(new LeaseAcquired(lease));
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        pipe.Writer.Complete();
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 2));
+        sm.Dispatch(new ReadCompleted(null, 2));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Transient });
         Assert.True(ops.PullOutboundCount > 0);
-
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Multiple_reconnects_should_increment_generation()
+    public void Multiple_reconnects_should_increment_generation()
     {
         var (sm, ops) = CreateStateMachine();
 
@@ -604,18 +580,53 @@ public sealed class TcpConnectionStateMachineSpec
         var lease2 = CreateTestLease();
         sm.Dispatch(new LeaseAcquired(lease2));
 
-        // Stale gen PipeReadComplete should be ignored
-        var pipe = new Pipe();
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
+        // Stale gen ReadCompleted should be ignored
+        var buffer = CreateTestBuffer(1, 2, 3);
 
         ops.PushedInbound.Clear();
-        sm.Dispatch(new PipeReadComplete(readResult, 1));
+        sm.Dispatch(new ReadCompleted(buffer, 1));
 
         Assert.Empty(ops.PushedInbound);
+    }
 
-        pipe.Reader.AdvanceTo(readResult.Buffer.End);
-        pipe.Writer.Complete();
-        pipe.Reader.Complete();
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_with_data_should_push_transport_data()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Dispatch(new LeaseAcquired(CreateTestLease()));
+        ops.PushedInbound.Clear();
+
+        var buffer = CreateTestBuffer(4, 5, 6);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 1));
+
+        var data = Assert.IsType<TransportData>(Assert.Single(ops.PushedInbound));
+        Assert.Equal(new byte[] { 4, 5, 6 }, data.Buffer.Span.ToArray());
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_with_stale_gen_should_dispose_buffer_and_push_nothing()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Dispatch(new LeaseAcquired(CreateTestLease()));
+        ops.PushedInbound.Clear();
+
+        var buffer = CreateTestBuffer(4, 5, 6);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 0));
+
+        Assert.Empty(ops.PushedInbound);
+        Assert.Equal(0, buffer.Capacity); // disposed buffers release their owner
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_null_should_signal_graceful_disconnect()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Dispatch(new LeaseAcquired(CreateTestLease()));
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new ReadCompleted(null, Gen: 1));
+
+        var disconnected = Assert.IsType<TransportDisconnected>(Assert.Single(ops.PushedInbound));
+        Assert.Equal(DisconnectReason.Graceful, disconnected.Reason);
     }
 }

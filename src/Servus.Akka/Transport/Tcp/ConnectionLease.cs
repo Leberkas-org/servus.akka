@@ -25,7 +25,6 @@ internal sealed class ConnectionLease : IDisposable
     public SocketPipeConnection Connection { get; }
     public ConnectionInfo Info { get; }
 
-    public PipeReader InputReader => Connection.InputReader;
     public PipeWriter OutputWriter => Connection.OutputWriter;
 
     public bool IsAlive() => _alive;

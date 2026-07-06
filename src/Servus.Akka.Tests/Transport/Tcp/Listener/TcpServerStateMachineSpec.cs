@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using System.Net;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
@@ -165,85 +164,67 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_with_data_should_push_lease()
+    public void Dispatch_ReadCompleted_with_data_should_push_lease()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 1));
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(buffer, 1));
 
         Assert.Single(ops.PushedInbound);
         var transportData = Assert.IsType<TransportData>(ops.PushedInbound[0]);
         Assert.Equal(3, transportData.Buffer.Length);
 
         transportData.Buffer.Dispose();
-        pipe.Writer.Complete();
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_completed_should_push_disconnected()
+    public void Dispatch_ReadCompleted_completed_should_push_disconnected()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        pipe.Writer.Complete();
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 1));
+        sm.Dispatch(new ReadCompleted(null, 1));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Graceful });
-
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadFailed_should_push_disconnected_error()
+    public void Dispatch_ReadFailed_should_push_disconnected_error()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeReadFailed(new IOException("pipe error"), 1));
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 1));
 
         Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Error });
     }
 
     [Fact(Timeout = 5000)]
-    public async Task Dispatch_PipeReadComplete_stale_gen_should_be_ignored()
+    public void Dispatch_ReadCompleted_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        var pipe = new Pipe();
-        await pipe.Writer.WriteAsync(new byte[] { 1, 2, 3 }, TestContext.Current.CancellationToken);
-        var readResult = await pipe.Reader.ReadAsync(TestContext.Current.CancellationToken);
-
-        sm.Dispatch(new PipeReadComplete(readResult, 999));
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(buffer, 999));
 
         Assert.Empty(ops.PushedInbound);
-
-        pipe.Reader.AdvanceTo(readResult.Buffer.End);
-        pipe.Writer.Complete();
-        pipe.Reader.Complete();
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeReadFailed_stale_gen_should_be_ignored()
+    public void Dispatch_ReadFailed_stale_gen_should_be_ignored()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeReadFailed(new IOException("stale"), 999));
+        sm.Dispatch(new ReadFailed(new IOException("stale"), 999));
 
         Assert.Empty(ops.PushedInbound);
     }
@@ -256,7 +237,7 @@ public sealed class TcpServerStateMachineSpec
         ops.PushedInbound.Clear();
         var pullBefore = ops.PullOutboundCount;
 
-        sm.Dispatch(new PipeReadFailed(new IOException("read error"), 1));
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 1));
 
         Assert.True(ops.PullOutboundCount > pullBefore);
     }
@@ -270,8 +251,62 @@ public sealed class TcpServerStateMachineSpec
         sm.HandleUpstreamFinish();
         var completeBefore = ops.CompleteStageCount;
 
-        sm.Dispatch(new PipeReadFailed(new IOException("read error"), 2));
+        sm.Dispatch(new ReadFailed(new IOException("read error"), 2));
 
         Assert.True(ops.CompleteStageCount > completeBefore);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_with_data_should_push_transport_data()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        ops.PushedInbound.Clear();
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 1));
+
+        var data = Assert.IsType<TransportData>(Assert.Single(ops.PushedInbound));
+        Assert.Equal(new byte[] { 1, 2, 3 }, data.Buffer.Span.ToArray());
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_with_stale_gen_should_dispose_buffer_and_push_nothing()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        ops.PushedInbound.Clear();
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 0));
+
+        Assert.Empty(ops.PushedInbound);
+        Assert.Equal(0, buffer.Capacity); // disposed buffers release their owner
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadCompleted_null_should_signal_graceful_disconnect()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new ReadCompleted(null, Gen: 1));
+
+        var disconnected = Assert.IsType<TransportDisconnected>(Assert.Single(ops.PushedInbound));
+        Assert.Equal(DisconnectReason.Graceful, disconnected.Reason);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_ReadFailed_should_signal_error_disconnect()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new ReadFailed(new IOException("boom"), Gen: 1));
+
+        var disconnected = Assert.IsType<TransportDisconnected>(Assert.Single(ops.PushedInbound));
+        Assert.Equal(DisconnectReason.Error, disconnected.Reason);
     }
 }

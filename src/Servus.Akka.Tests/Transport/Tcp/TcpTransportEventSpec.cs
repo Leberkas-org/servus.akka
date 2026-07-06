@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
 
@@ -28,20 +27,32 @@ public sealed class TcpTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void PipeReadComplete_should_preserve_fields()
+    public void ReadCompleted_should_preserve_fields()
     {
-        var result = new ReadResult(default, isCanceled: false, isCompleted: true);
-        var evt = new PipeReadComplete(result, 5);
+        var buffer = TransportBuffer.Rent(3);
+        buffer.Length = 3;
+        var evt = new ReadCompleted(buffer, 5);
 
         Assert.Equal(5, evt.Gen);
-        Assert.True(evt.Result.IsCompleted);
+        Assert.Same(buffer, evt.Buffer);
+
+        buffer.Dispose();
     }
 
     [Fact(Timeout = 5000)]
-    public void PipeReadFailed_should_preserve_error()
+    public void ReadCompleted_null_buffer_should_preserve_gen()
+    {
+        var evt = new ReadCompleted(null, 7);
+
+        Assert.Equal(7, evt.Gen);
+        Assert.Null(evt.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void ReadFailed_should_preserve_error()
     {
         var ex = new IOException("read error");
-        var evt = new PipeReadFailed(ex, 3);
+        var evt = new ReadFailed(ex, 3);
 
         Assert.Same(ex, evt.Error);
         Assert.Equal(3, evt.Gen);
