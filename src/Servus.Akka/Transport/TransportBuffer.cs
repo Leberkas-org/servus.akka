@@ -18,6 +18,14 @@ public sealed class TransportBuffer : IDisposable
 
     public Memory<byte> FullMemory => _owner!.Memory;
 
+    /// <summary>
+    /// Start of the data within <see cref="FullMemory"/>. Non-zero only for offset-wrapped buffers
+    /// (see <see cref="Wrap(IMemoryOwner{byte}, int, int)"/>). Consumers that parse via
+    /// <see cref="FullMemory"/> for capacity reuse MUST account for this — <see cref="Memory"/> and
+    /// <see cref="Span"/> already do.
+    /// </summary>
+    public int Offset => _offset;
+
     public int Capacity => _owner?.Memory.Length ?? 0;
 
     public static int MaxPoolSize { get; private set; } = Environment.ProcessorCount * 4;
