@@ -120,14 +120,15 @@ public sealed class QuicConnectionMigrationSpec
         sm.Dispatch(new ConnectionLeaseAcquired(lease));
 
         const long streamId = 0L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
         var buf = TransportBuffer.Rent(4);
         new byte[] { 1, 2, 3, 4 }.CopyTo(buf.FullMemory.Span);
         buf.Length = 4;
-        sm.Dispatch(new PipeStreamReadComplete(buf, streamId, 2, false));
+        state.BeginDirectRead(buf);
+        sm.Dispatch(new DirectStreamReadComplete(state, 4));
 
         Assert.DoesNotContain(ops.PushedInbound, i => i is ConnectionMigrationDetected);
 

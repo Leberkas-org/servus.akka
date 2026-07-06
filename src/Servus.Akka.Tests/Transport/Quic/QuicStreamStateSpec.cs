@@ -307,15 +307,15 @@ public sealed class QuicStreamStateSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void AttachConnection_with_QuicStream_should_set_DirectReadTransform()
+    public void AttachConnection_with_non_QuicStream_should_use_pipe_read_path()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
-        // MemoryStream is not a QuicStream, so DirectReadTransform stays null
+        // MemoryStream is not a QuicStream, so the direct-read path (QuicStream) stays unavailable.
         state.AttachConnection(new MemoryStream());
 
-        Assert.Null(state.DirectReadTransform);
         Assert.Null(state.QuicStream);
+        Assert.NotNull(state.InputReader);
     }
 
     [Fact(Timeout = 5000)]
@@ -334,41 +334,88 @@ public sealed class QuicStreamStateSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void FailureReadTransform_with_QuicException_should_return_PipeStreamReadComplete()
+    public void FailureReadTransform_should_be_a_pure_wrapper()
     {
-        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
-        state.ActivateDirectReadForTest(42);
-
-        var buf = TransportBuffer.Rent(64);
-        buf.Length = 16;
-        state.PendingReadBuffer = buf;
-
-        var quicEx = new QuicException(QuicError.StreamAborted, applicationErrorCode: null, "stream reset by peer");
-        var result = state.FailureReadTransform!(quicEx);
-
-        var complete = Assert.IsType<PipeStreamReadComplete>(result);
-        Assert.Equal(42, complete.StreamId);
-        Assert.True(complete.IsCompleted);
-        Assert.Null(state.PendingReadBuffer);
-    }
-
-    [Fact(Timeout = 5000)]
-    public void FailureReadTransform_with_non_QuicException_should_return_PipeStreamReadFailed()
-    {
+        // The transform runs on an IO-completion thread and must not touch mutable state — it only
+        // packages the exception and the state reference; buffer release and QuicException
+        // classification happen on the actor (CompleteRead / the state machine's failure handler).
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(7);
 
         var buf = TransportBuffer.Rent(64);
         buf.Length = 16;
-        state.PendingReadBuffer = buf;
+        state.BeginDirectRead(buf);
 
         var ioEx = new IOException("network error");
-        var result = state.FailureReadTransform!(ioEx);
+        var result = state.FailureReadTransform(ioEx);
 
         var failed = Assert.IsType<PipeStreamReadFailed>(result);
-        Assert.Equal(7, failed.StreamId);
         Assert.Same(ioEx, failed.Error);
-        Assert.Null(state.PendingReadBuffer);
+        Assert.Same(state, failed.State);
+        Assert.Same(buf, state.PendingReadBuffer);
+        Assert.True(state.ReadInFlight);
+
+        Assert.True(state.CompleteRead(out var pending));
+        pending!.Dispose();
     }
 
+    [Fact(Timeout = 5000)]
+    public void DirectReadTransform_should_be_a_pure_wrapper()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(42);
+
+        var buf = TransportBuffer.Rent(64);
+        state.BeginDirectRead(buf);
+
+        var result = state.DirectReadTransform(16);
+
+        var complete = Assert.IsType<DirectStreamReadComplete>(result);
+        Assert.Same(state, complete.State);
+        Assert.Equal(16, complete.BytesRead);
+        Assert.Same(buf, state.PendingReadBuffer);
+        Assert.True(state.ReadInFlight);
+
+        Assert.True(state.CompleteRead(out var pending));
+        pending!.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task DisposeAndReturnAsync_with_read_in_flight_should_defer_buffer_to_CompleteRead()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(11);
+
+        var buf = TransportBuffer.Rent(64);
+        state.BeginDirectRead(buf);
+
+        // Teardown races an in-flight QuicStream.ReadAsync that is still writing into buf's memory:
+        // the buffer must NOT be disposed here (returning its array to the shared pool while the
+        // read writes into it corrupts whichever connection rents it next — the poisoned-pool bug
+        // behind the GaudiHTTP 8 MB H2 download stall).
+        await state.DisposeAndReturnAsync();
+
+        Assert.True(state.ReadInFlight);
+        Assert.NotNull(state.PendingReadBuffer);
+
+        // When the completion event reaches the actor, CompleteRead releases the buffer exactly
+        // once and reports the teardown so the event is dropped.
+        Assert.False(state.CompleteRead(out var pending));
+        Assert.Null(pending);
+        Assert.Null(state.PendingReadBuffer);
+        Assert.False(state.ReadInFlight);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task DisposeAndReturnAsync_without_read_in_flight_should_reset_state()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(17);
+
+        await state.DisposeAndReturnAsync();
+
+        Assert.False(state.ReadInFlight);
+        Assert.Null(state.PendingReadBuffer);
+        Assert.Equal(StreamPhase.Opening, state.Phase);
+    }
 }

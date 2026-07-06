@@ -43,17 +43,25 @@ public sealed class QuicTransportStateMachineSpec
         return (ops, sm);
     }
 
-    private static PipeStreamReadComplete CreateReadEvent(byte[] data, long streamId, int gen)
+    private static DirectStreamReadComplete CreateReadEvent(QuicStreamState state, byte[] data)
     {
         var buf = TransportBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        return new PipeStreamReadComplete(buf, streamId, gen, false);
+        state.BeginDirectRead(buf);
+        return new DirectStreamReadComplete(state, data.Length);
     }
 
-    private static PipeStreamReadComplete CreateCompletedReadEvent(long streamId, int gen)
+    private static DirectStreamReadComplete CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new PipeStreamReadComplete(null, streamId, gen, true);
+        return new DirectStreamReadComplete(state, 0);
+    }
+
+    private static QuicStreamState CreateDetachedStreamState(long streamId)
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(streamId);
+        return state;
     }
 
     [Fact(Timeout = 5000)]
@@ -128,15 +136,21 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadComplete_should_ignore_when_gen_mismatch()
+    public void Dispatch_read_completion_after_stream_teardown_should_be_dropped()
     {
-        var ops = new StubOps();
-        var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
+        var (ops, sm) = CreateConnectedStateMachine();
+        var state = sm.RegisterTestStream(1, StreamDirection.Bidirectional);
 
-        var evt = CreateReadEvent([1, 2, 3, 4], 1, 99);
+        // Read in flight, then the stream is torn down before the completion arrives.
+        var evt = CreateReadEvent(state, [1, 2, 3, 4]);
+        sm.HandlePush(new ResetStream(1, 42));
+        ops.PushedInbound.Clear();
+
         sm.Dispatch(evt);
 
         Assert.Empty(ops.PushedInbound);
+        Assert.Null(state.PendingReadBuffer);
+        Assert.False(state.ReadInFlight);
     }
 
     [Fact(Timeout = 5000)]
@@ -315,12 +329,12 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_should_handle_gracefully()
+    public void Dispatch_PipeStreamReadFailed_for_unknown_stream_should_handle_gracefully()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), 1, 0));
+        sm.Dispatch(new PipeStreamReadFailed(CreateDetachedStreamState(1), new IOException("Read failed")));
 
         Assert.Empty(ops.PushedInbound);
     }
@@ -388,16 +402,16 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadComplete_with_matching_gen_should_push_MultiplexedData()
+    public void Dispatch_direct_read_completion_should_push_MultiplexedData()
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
         const long streamId = 123L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
-        var evt = CreateReadEvent([1, 2, 3, 4], streamId, 2);
+        var evt = CreateReadEvent(state, [1, 2, 3, 4]);
         sm.Dispatch(evt);
 
         Assert.Single(ops.PushedInbound);
@@ -449,16 +463,16 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadComplete_completed_should_push_StreamReadCompleted()
+    public void Dispatch_completed_read_should_push_StreamReadCompleted()
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 789L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
-        var evt = CreateCompletedReadEvent(streamId, 2);
+        var evt = CreateCompletedReadEvent(state);
         sm.Dispatch(evt);
 
         var completed = ops.PushedInbound.OfType<StreamReadCompleted>().FirstOrDefault();
@@ -472,16 +486,37 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 999L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), streamId, 2));
+        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);
         Assert.Equal(new StreamTarget(streamId), closed.Id);
         Assert.Equal(DisconnectReason.Error, closed.Reason);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_PipeStreamReadFailed_with_QuicException_should_complete_stream_gracefully()
+    {
+        // QuicException on read = peer closed/reset the stream (FIN/STOP_SENDING/RST_STREAM):
+        // classified on the actor as a graceful stream completion, not an error.
+        var (ops, sm) = CreateConnectedStateMachine();
+
+        var streamId = 777L;
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new PipeStreamReadFailed(state,
+            new System.Net.Quic.QuicException(System.Net.Quic.QuicError.StreamAborted, null, "aborted")));
+
+        var completed = ops.PushedInbound.OfType<StreamReadCompleted>().FirstOrDefault();
+        Assert.NotNull(completed);
+        Assert.Equal(new StreamTarget(streamId), completed.Id);
+        Assert.DoesNotContain(ops.PushedInbound, i => i is StreamClosed);
     }
 
     [Fact(Timeout = 5000)]
@@ -566,18 +601,18 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadComplete_completed_with_half_closed_write_should_remove_stream()
+    public void Dispatch_completed_read_with_half_closed_write_should_remove_stream()
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
         var streamId = 333L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         sm.HandlePush(new CompleteWrites(streamId));
 
         ops.PushedInbound.Clear();
 
-        var evt = CreateCompletedReadEvent(streamId, 2);
+        var evt = CreateCompletedReadEvent(state);
         sm.Dispatch(evt);
 
         var readCompleted = ops.PushedInbound.OfType<StreamReadCompleted>().FirstOrDefault();
@@ -601,12 +636,12 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
 
         var streamId = 111L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
         sm.Dispatch(new PipeStreamReadFailed(
-            new ObjectDisposedException("Connection disposed"), streamId, 2));
+            state, new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -636,7 +671,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.Completed = false;
 
         sm.Dispatch(new PipeStreamReadFailed(
-            new ObjectDisposedException("Connection disposed"), 1, 2));
+            CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -662,7 +697,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PullCount = 0;
 
         sm.Dispatch(new PipeStreamReadFailed(
-            new ObjectDisposedException("Connection disposed"), 1, 2));
+            CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -705,11 +740,11 @@ public sealed class QuicTransportStateMachineSpec
         var (ops, sm) = CreateConnectedStateMachine();
 
         StreamTarget streamId = 888L;
-        sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), streamId, 2));
+        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);

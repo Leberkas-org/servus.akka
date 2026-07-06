@@ -48,17 +48,18 @@ public sealed class QuicServerStateMachineSpec
         return buf;
     }
 
-    private static PipeStreamReadComplete CreateReadEvent(byte[] data, long streamId, int gen)
+    private static DirectStreamReadComplete CreateReadEvent(QuicStreamState state, byte[] data)
     {
         var buf = TransportBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        return new PipeStreamReadComplete(buf, streamId, gen, false);
+        state.BeginDirectRead(buf);
+        return new DirectStreamReadComplete(state, data.Length);
     }
 
-    private static PipeStreamReadComplete CreateCompletedReadEvent(long streamId, int gen)
+    private static DirectStreamReadComplete CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new PipeStreamReadComplete(null, streamId, gen, true);
+        return new DirectStreamReadComplete(state, 0);
     }
 
     [Fact(Timeout = 5000)]
@@ -159,10 +160,10 @@ public sealed class QuicServerStateMachineSpec
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.RegisterTestStream(42, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(42, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
-        var evt = CreateReadEvent([1, 2, 3], 42, 1);
+        var evt = CreateReadEvent(state, [1, 2, 3]);
         sm.Dispatch(evt);
 
         Assert.Single(ops.PushedInbound);
@@ -171,18 +172,23 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadComplete_with_stale_gen_should_be_ignored()
+    public void Dispatch_read_completion_after_stream_teardown_should_be_dropped()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.RegisterTestStream(42, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(42, StreamDirection.Bidirectional);
+
+        // Read in flight, then the stream is torn down before the completion arrives.
+        var evt = CreateReadEvent(state, [1, 2, 3]);
+        sm.HandlePush(new ResetStream(42));
         ops.PushedInbound.Clear();
 
-        var evt = CreateReadEvent([1, 2, 3], 42, 999);
         sm.Dispatch(evt);
 
         Assert.Empty(ops.PushedInbound);
+        Assert.Null(state.PendingReadBuffer);
+        Assert.False(state.ReadInFlight);
     }
 
     [Fact(Timeout = 5000)]
@@ -257,10 +263,10 @@ public sealed class QuicServerStateMachineSpec
         sm.Start();
         ops.PushedInbound.Clear();
 
-        sm.RegisterTestStream(1, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
-        var evt = CreateCompletedReadEvent(1, 1);
+        var evt = CreateCompletedReadEvent(state);
         sm.Dispatch(evt);
 
         Assert.Contains(ops.PushedInbound, item => item is StreamReadCompleted { Id.Value: 1 });
@@ -300,10 +306,10 @@ public sealed class QuicServerStateMachineSpec
         var (sm, ops) = CreateStateMachine();
         sm.Start();
 
-        sm.RegisterTestStream(1, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(new IOException("Read failed"), 1, 1));
+        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
 
         Assert.Contains(ops.PushedInbound,
             item => item is StreamClosed { Id.Value: 1, Reason: DisconnectReason.Error });

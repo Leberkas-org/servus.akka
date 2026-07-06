@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Net;
 using Akka.Actor;
 
@@ -13,7 +14,6 @@ internal sealed class QuicServerStateMachine(
     private const string MigrationCheckTimerKey = "migration-check";
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
 
-    private int _connectionGen;
     private bool _upstreamFinished;
     private EndPoint? _lastRemoteEndPoint;
     private CancellationTokenSource? _acceptCts;
@@ -24,7 +24,6 @@ internal sealed class QuicServerStateMachine(
 
     public void Start()
     {
-        _connectionGen++;
         _lastRemoteEndPoint = connectionHandle.RemoteEndPoint();
         ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
 
@@ -37,23 +36,14 @@ internal sealed class QuicServerStateMachine(
     {
         switch (evt)
         {
-            case PipeStreamReadComplete e:
-                if (e.Gen == _connectionGen)
-                {
-                    OnPipeStreamReadComplete(e);
-                }
-                else
-                {
-                    e.Buffer?.Dispose();
-                }
-
+            case DirectStreamReadComplete e:
+                OnDirectStreamReadComplete(e);
+                break;
+            case PipeStreamReadResult e:
+                OnPipeStreamReadResult(e);
                 break;
             case PipeStreamReadFailed e:
-                if (e.Gen == _connectionGen)
-                {
-                    OnPipeStreamReadFailed(e);
-                }
-
+                OnPipeStreamReadFailed(e);
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
@@ -188,7 +178,7 @@ internal sealed class QuicServerStateMachine(
         state.AttachConnection(stream, rawStreamId);
         if (state.Direction == StreamDirection.Bidirectional)
         {
-            RequestStreamRead(streamId, _connectionGen);
+            RequestStreamRead(streamId);
         }
 
         ops.OnPushInbound(new StreamOpened(streamId, state.Direction));
@@ -205,29 +195,31 @@ internal sealed class QuicServerStateMachine(
         _streams[streamId] = state;
 
         ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
-        RequestStreamRead(streamId, _connectionGen);
+        RequestStreamRead(streamId);
     }
 
-    internal void RegisterTestStream(long streamId, StreamDirection direction)
+    internal QuicStreamState RegisterTestStream(long streamId, StreamDirection direction)
     {
         var target = StreamTarget.FromId(streamId);
         var state = QuicStreamState.Rent(direction, pipeOptions);
         state.ActivateWithoutConnection();
+        state.ActivateDirectReadForTest(streamId);
         _streams[target] = state;
+        return state;
     }
 
-    private void RequestStreamRead(StreamTarget streamId, int gen)
+    internal QuicStreamState? GetStreamForTest(long streamId)
+        => _streams.GetValueOrDefault(StreamTarget.FromId(streamId));
+
+    private void RequestStreamRead(StreamTarget streamId)
     {
         if (!_streams.TryGetValue(streamId, out var state))
         {
             return;
         }
 
-        state.ReadGen = gen;
-
-        if (state.DirectReadTransform is not null)
+        if (state.QuicStream is { } qs)
         {
-            var qs = state.QuicStream!;
             if (qs.ReadsClosed.IsCompleted)
             {
                 OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
@@ -235,7 +227,7 @@ internal sealed class QuicServerStateMachine(
             }
 
             var buf = TransportBuffer.Rent(state.ReadHint);
-            state.PendingReadBuffer = buf;
+            state.BeginDirectRead(buf);
             qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
                 success: state.DirectReadTransform,
                 failure: state.FailureReadTransform);
@@ -247,37 +239,93 @@ internal sealed class QuicServerStateMachine(
             return;
         }
 
-        state.InputReader.ReadAsync().PipeTo(self,
-            success: state.ReadSuccessTransform!,
-            failure: ex => new PipeStreamReadFailed(ex, streamId.Value, gen));
+        var reader = state.InputReader;
+
+        if (state.PendingAdvance is { } pos)
+        {
+            state.PendingAdvance = null;
+            reader.AdvanceTo(pos);
+        }
+
+        state.BeginPipeRead();
+        reader.ReadAsync().PipeTo(self,
+            success: state.PipeReadTransform,
+            failure: state.FailureReadTransform);
     }
 
-    private void OnPipeStreamReadComplete(PipeStreamReadComplete evt)
+    private void OnDirectStreamReadComplete(DirectStreamReadComplete evt)
     {
-        var streamId = StreamTarget.FromId(evt.StreamId);
-        if (!_streams.TryGetValue(streamId, out _))
+        var state = evt.State;
+        if (!state.CompleteRead(out var buf))
         {
-            evt.Buffer?.Dispose();
+            // Stream torn down while the read was in flight; the pending buffer is released.
             return;
         }
 
-        if (evt.Buffer is not null)
+        if (evt.BytesRead == 0 || buf is null)
         {
-            ops.OnPushInbound(MultiplexedData.Rent(evt.Buffer, streamId));
-        }
-
-        if (evt.IsCompleted)
-        {
-            OnInboundComplete(DisconnectReason.Graceful, evt.StreamId);
+            buf?.Dispose();
+            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
             return;
         }
 
-        RequestStreamRead(streamId, _connectionGen);
+        buf.Length = evt.BytesRead;
+        state.AdaptReadHint(evt.BytesRead);
+        var streamId = StreamTarget.FromId(state.StreamId);
+        ops.OnPushInbound(MultiplexedData.Rent(buf, streamId));
+        RequestStreamRead(streamId);
+    }
+
+    private void OnPipeStreamReadResult(PipeStreamReadResult evt)
+    {
+        var state = evt.State;
+        if (!state.CompleteRead(out _))
+        {
+            return;
+        }
+
+        var streamId = StreamTarget.FromId(state.StreamId);
+        var result = evt.Result;
+
+        if (result.Buffer.Length > 0)
+        {
+            var length = (int)result.Buffer.Length;
+            var buf = TransportBuffer.Rent(length);
+            result.Buffer.CopyTo(buf.FullMemory.Span);
+            buf.Length = length;
+            ops.OnPushInbound(MultiplexedData.Rent(buf, streamId));
+        }
+
+        // Deferred like the TCP read pump: AdvanceTo runs on the actor right before the next
+        // ReadAsync, so the pipe's internal buffers are never touched from an IO thread.
+        state.PendingAdvance = result.Buffer.End;
+
+        if (result.IsCompleted || result.IsCanceled)
+        {
+            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
+            return;
+        }
+
+        RequestStreamRead(streamId);
     }
 
     private void OnPipeStreamReadFailed(PipeStreamReadFailed evt)
     {
-        OnInboundComplete(DisconnectReason.Error, evt.StreamId);
+        var state = evt.State;
+        if (!state.CompleteRead(out _))
+        {
+            return;
+        }
+
+        // QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/
+        // RST_STREAM) — a graceful stream completion, not an error to propagate.
+        if (evt.Error is System.Net.Quic.QuicException)
+        {
+            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
+            return;
+        }
+
+        OnInboundComplete(DisconnectReason.Error, state.StreamId);
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)
@@ -383,7 +431,6 @@ internal sealed class QuicServerStateMachine(
 
     private void Cleanup()
     {
-        _connectionGen++;
         StopAcceptLoop();
 
         foreach (var (_, state) in _streams)

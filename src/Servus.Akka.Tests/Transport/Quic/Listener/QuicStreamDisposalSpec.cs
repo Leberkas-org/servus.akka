@@ -45,10 +45,10 @@ public sealed class QuicStreamDisposalSpec
         var (sm, _) = CreateStateMachine();
         sm.Start();
 
-        sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new PipeStreamReadComplete(null, 4, 1, true));
+        sm.Dispatch(new DirectStreamReadComplete(state, 0));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -60,13 +60,13 @@ public sealed class QuicStreamDisposalSpec
         var (sm, _) = CreateStateMachine();
         sm.Start();
 
-        sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
         Assert.Equal(1, sm.ActiveStreamCount);
 
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new PipeStreamReadComplete(null, 4, 1, true));
+        sm.Dispatch(new DirectStreamReadComplete(state, 0));
         Assert.Equal(0, sm.ActiveStreamCount);
     }
 
@@ -97,7 +97,7 @@ public sealed class QuicStreamDisposalSpec
         Assert.Equal(1, sm.ActiveStreamCount);
         Assert.Contains(ops.PushedInbound, item => item is ServerStreamAccepted { Id.Value: 4 });
 
-        sm.Dispatch(new PipeStreamReadComplete(null, 4, 1, true));
+        sm.Dispatch(new DirectStreamReadComplete(sm.GetStreamForTest(4)!, 0));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -120,7 +120,7 @@ public sealed class QuicStreamDisposalSpec
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new PipeStreamReadComplete(null, 4, 1, true));
+        sm.Dispatch(new DirectStreamReadComplete(sm.GetStreamForTest(4)!, 0));
         Assert.Equal(0, sm.ActiveStreamCount);
 
         await trackingStream.WaitForDisposalAsync();
@@ -132,10 +132,11 @@ public sealed class QuicStreamDisposalSpec
         var (sm, _) = CreateStateMachine();
         sm.Start();
 
+        var states = new Dictionary<long, QuicStreamState>();
         for (var i = 0; i < 150; i++)
         {
             var streamId = i * 4;
-            sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
+            states[streamId] = sm.RegisterTestStream(streamId, StreamDirection.Bidirectional);
         }
 
         Assert.Equal(150, sm.ActiveStreamCount);
@@ -143,7 +144,7 @@ public sealed class QuicStreamDisposalSpec
         for (var i = 0; i < 150; i++)
         {
             var streamId = i * 4;
-            sm.Dispatch(new PipeStreamReadComplete(null, streamId, 1, true));
+            sm.Dispatch(new DirectStreamReadComplete(states[streamId], 0));
             sm.HandlePush(new CompleteWrites(streamId));
         }
 

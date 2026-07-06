@@ -34,32 +34,22 @@ internal sealed class QuicStreamState : IAsyncDisposable
     public PipeReader? InputReader => _connection?.InputReader;
 
     /// <summary>
-    /// The connection generation that will be stamped into the next <see cref="PipeStreamReadComplete"/>
-    /// message. Set by the state machine immediately before calling PipeTo, so the cached delegate
-    /// picks it up at invocation time without capturing it as a per-read local.
+    /// Cached PipeTo transforms — pure wrappers that only capture <c>this</c> and package the raw
+    /// completion into an event. They run on IO-completion threads and deliberately touch NO mutable
+    /// state; all buffer/lifecycle handling happens on the actor when the event is dispatched. This
+    /// is the same model as <see cref="Tcp.Client.TcpConnectionStateMachine"/>'s read pump and keeps
+    /// every field on this class actor-confined (no fences, no Interlocked).
     /// </summary>
-    internal int ReadGen;
+    internal readonly Func<int, IQuicTransportEvent> DirectReadTransform;
+    internal readonly Func<ReadResult, IQuicTransportEvent> PipeReadTransform;
+    internal readonly Func<Exception, IQuicTransportEvent> FailureReadTransform;
 
-    /// <summary>
-    /// Cached per-stream success transform for PipeTo. Allocated once in
-    /// <see cref="AttachConnection"/> (and in <see cref="ActivateWithoutConnection"/> for tests),
-    /// reused for every subsequent read on this stream to avoid per-read closure allocations.
-    /// </summary>
-    internal Func<ReadResult, IQuicTransportEvent>? ReadSuccessTransform;
-
-    /// <summary>
-    /// Direct-read transform used when the stream is a <see cref="System.Net.Quic.QuicStream"/>.
-    /// Converts a raw byte count into a <see cref="PipeStreamReadComplete"/> event, consuming and
-    /// clearing <see cref="PendingReadBuffer"/> in the process.
-    /// </summary>
-    internal Func<int, IQuicTransportEvent>? DirectReadTransform;
-
-    /// <summary>
-    /// Cached per-stream failure transform for PipeTo on direct (QuicStream) reads. Allocated
-    /// once in <see cref="AttachConnection"/>, reused for every subsequent read on this stream
-    /// to avoid per-read closure allocations.
-    /// </summary>
-    internal Func<Exception, IQuicTransportEvent>? FailureReadTransform;
+    private QuicStreamState()
+    {
+        DirectReadTransform = bytesRead => new DirectStreamReadComplete(this, bytesRead);
+        PipeReadTransform = result => new PipeStreamReadResult(this, result);
+        FailureReadTransform = ex => new PipeStreamReadFailed(this, ex);
+    }
 
     /// <summary>
     /// The underlying <see cref="System.Net.Quic.QuicStream"/> if the connection was attached via
@@ -67,11 +57,58 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// </summary>
     internal QuicStream? QuicStream => _stream as QuicStream;
 
+    internal long StreamId => _streamId;
+
     private int _shrinkCount;
 
     public int ReadHint { get; private set; } = 4 * 1024;
 
+    // Read-pump state. Actor-confined: written by BeginDirectRead/BeginPipeRead (read dispatch),
+    // CompleteRead (completion arrival) and DisposeAndReturnAsync (teardown) — all of which run on
+    // the owning connection actor. The buffer an in-flight QuicStream.ReadAsync writes into must
+    // survive until its completion EVENT is processed; disposing it at teardown while the read was
+    // still writing was the double-dispose that poisoned the shared TransportBuffer pool and
+    // corrupted unrelated connections (repro: GaudiHTTP LargeDownloadRegressionSpec under H3 load).
     internal TransportBuffer? PendingReadBuffer { get; set; }
+    internal bool ReadInFlight { get; private set; }
+    internal SequencePosition? PendingAdvance { get; set; }
+    private bool _tornDownWithReadInFlight;
+
+    /// <summary>
+    /// Publishes the buffer an in-flight <see cref="System.Net.Quic.QuicStream.ReadAsync(Memory{byte}, CancellationToken)"/>
+    /// writes into and marks the read as in flight. Until <see cref="CompleteRead"/> runs, teardown
+    /// must not dispose the buffer (the read may still be writing into its memory) and this instance
+    /// must not be returned to the pool.
+    /// </summary>
+    internal void BeginDirectRead(TransportBuffer buffer)
+    {
+        PendingReadBuffer = buffer;
+        ReadInFlight = true;
+    }
+
+    /// <summary>Marks a pipe-reader read as in flight (no pending buffer; lifecycle gating only).</summary>
+    internal void BeginPipeRead() => ReadInFlight = true;
+
+    /// <summary>
+    /// Actor-side arrival of a read completion (success or failure). Returns false when the stream
+    /// was torn down while the read was in flight — the pending buffer has then been released here
+    /// and the caller must drop the event; the instance itself is GC-reclaimed (never repooled).
+    /// </summary>
+    internal bool CompleteRead(out TransportBuffer? pendingBuffer)
+    {
+        ReadInFlight = false;
+        pendingBuffer = PendingReadBuffer;
+        PendingReadBuffer = null;
+
+        if (_tornDownWithReadInFlight)
+        {
+            pendingBuffer?.Dispose();
+            pendingBuffer = null;
+            return false;
+        }
+
+        return true;
+    }
 
     public void AdaptReadHint(int bytesRead)
     {
@@ -118,10 +155,13 @@ internal sealed class QuicStreamState : IAsyncDisposable
     }
 
     // Called after DisposeAsync() has already cleaned up unmanaged resources.
-    // Clears reference fields so the pooled object doesn't retain stale closures.
+    // Clears reference fields so the pooled object doesn't retain stale state.
     private void ResetAfterDispose()
     {
         PendingReadBuffer = null;
+        PendingAdvance = null;
+        ReadInFlight = false;
+        _tornDownWithReadInFlight = false;
         _openingBuffer = null;
         _connection = null;
         _stream = null;
@@ -130,9 +170,6 @@ internal sealed class QuicStreamState : IAsyncDisposable
         _streamId = 0;
         _direction = default;
         _pipeOptions = null;
-        DirectReadTransform = null!;
-        ReadSuccessTransform = null!;
-        FailureReadTransform = null;
         IsCompleteWritesDeferred = false;
         Phase = StreamPhase.Opening;
         ResetReadHint();
@@ -140,68 +177,22 @@ internal sealed class QuicStreamState : IAsyncDisposable
 
     public async ValueTask DisposeAndReturnAsync()
     {
+        // Decided synchronously on the calling (actor) thread, BEFORE the first await hop — the
+        // continuation below runs on an arbitrary thread and must not make lifecycle decisions.
+        if (ReadInFlight)
+        {
+            // The in-flight read's completion event still references this instance. CompleteRead
+            // releases the pending buffer when it arrives on the actor; the instance itself is
+            // deliberately never repooled (a late completion must not observe a re-rented state) —
+            // a bounded, rare pool miss on teardown-with-read-in-flight.
+            _tornDownWithReadInFlight = true;
+            await DisposeAsync().ConfigureAwait(false);
+            return;
+        }
+
         await DisposeAsync().ConfigureAwait(false);
         ResetAfterDispose();
         Pool.Return(this);
-    }
-
-
-    internal void DisposePendingReadBuffer()
-    {
-        var buf = PendingReadBuffer;
-        PendingReadBuffer = null;
-        buf?.Dispose();
-    }
-
-    private Func<ReadResult, IQuicTransportEvent> BuildReadSuccessTransform(long rawStreamId)
-    {
-        return result =>
-        {
-            TransportBuffer? buf = null;
-            if (result.Buffer.Length > 0)
-            {
-                var length = (int)result.Buffer.Length;
-                buf = TransportBuffer.Rent(length);
-                result.Buffer.CopyTo(buf.FullMemory.Span);
-                buf.Length = length;
-            }
-
-            _cachedReader!.AdvanceTo(result.Buffer.End);
-            return new PipeStreamReadComplete(buf, rawStreamId, ReadGen, result.IsCompleted || result.IsCanceled);
-        };
-    }
-
-    private Func<int, IQuicTransportEvent> BuildDirectReadTransform(long rawStreamId)
-    {
-        return bytesRead =>
-        {
-            var buf = PendingReadBuffer;
-            PendingReadBuffer = null;
-            if (bytesRead == 0 || buf is null)
-            {
-                buf?.Dispose();
-                return new PipeStreamReadComplete(null, rawStreamId, ReadGen, true);
-            }
-            buf.Length = bytesRead;
-            AdaptReadHint(bytesRead);
-            return new PipeStreamReadComplete(buf, rawStreamId, ReadGen, false);
-        };
-    }
-
-    private Func<Exception, IQuicTransportEvent> BuildFailureReadTransform()
-    {
-        return ex =>
-        {
-            DisposePendingReadBuffer();
-            // QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/RST_STREAM).
-            // Treat it as a graceful completion to avoid propagating a 184B exception object per stream
-            // through the error-handling path when the stream was already being torn down.
-            if (ex is QuicException)
-            {
-                return new PipeStreamReadComplete(null!, _streamId, ReadGen, true);
-            }
-            return new PipeStreamReadFailed(ex, _streamId, ReadGen);
-        };
     }
 
     internal void ActivateWithoutConnection()
@@ -210,16 +201,14 @@ internal sealed class QuicStreamState : IAsyncDisposable
     }
 
     /// <summary>
-    /// Test-only: initialises the direct-read transforms on this state without requiring a real
-    /// <see cref="System.Net.Quic.QuicStream"/>. Allows unit tests to invoke
-    /// <see cref="DirectReadTransform"/> and <see cref="FailureReadTransform"/> in isolation.
+    /// Test-only: gives this state a stream id and marks it active without a real connection, so
+    /// unit tests can drive the read-completion handling (<see cref="CompleteRead"/>, transforms)
+    /// in isolation.
     /// </summary>
     internal void ActivateDirectReadForTest(long streamId)
     {
         _streamId = streamId;
         Phase = StreamPhase.Active;
-        DirectReadTransform = BuildDirectReadTransform(streamId);
-        FailureReadTransform = BuildFailureReadTransform();
     }
 
     public void AttachConnection(Stream stream, long rawStreamId = 0)
@@ -230,14 +219,11 @@ internal sealed class QuicStreamState : IAsyncDisposable
         if (stream is QuicStream qs)
         {
             _connection = SocketPipeConnection.CreateForQuic(qs, _pipeOptions);
-            DirectReadTransform = BuildDirectReadTransform(rawStreamId);
-            FailureReadTransform = BuildFailureReadTransform();
         }
         else
         {
             _connection = SocketPipeConnection.Create(stream, _pipeOptions);
             _cachedReader = _connection.InputReader;
-            ReadSuccessTransform = BuildReadSuccessTransform(rawStreamId);
         }
 
         if (_openingBuffer is not null)
@@ -366,7 +352,17 @@ internal sealed class QuicStreamState : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        DisposePendingReadBuffer();
+        // Runs synchronously up to the first await, i.e. still on the calling (actor) thread.
+        if (!ReadInFlight)
+        {
+            // No read in flight: an orphaned pending buffer is exclusively ours to release.
+            PendingReadBuffer?.Dispose();
+            PendingReadBuffer = null;
+        }
+        // else: the in-flight QuicStream.ReadAsync may still be WRITING into the buffer's memory —
+        // disposing (= returning the array to the shared pool) here would corrupt whoever rents it
+        // next. CompleteRead releases it when the completion event arrives on the actor.
+
         DisposePendingWrites();
 
         if (_drainTask is not null)
