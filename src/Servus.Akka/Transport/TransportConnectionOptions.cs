@@ -10,4 +10,11 @@ internal sealed record TransportConnectionOptions
     public int ReceiveBufferHint { get; init; } = 64 * 1024;
     public long OutputHighWatermark { get; init; } = 512 * 1024;
     public long OutputLowWatermark { get; init; } = 256 * 1024;
+
+    internal static TransportConnectionOptions FromListener(ListenerOptions listener) => new()
+    {
+        ReceiveBufferHint = listener.ReceiveBufferHint,
+        OutputHighWatermark = listener.OutputPauseThreshold,
+        OutputLowWatermark = listener.OutputResumeThreshold,
+    };
 }

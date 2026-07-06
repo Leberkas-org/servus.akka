@@ -13,7 +13,7 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
     private readonly ConnectionInfo _connectionInfo;
     private readonly SslStream? _sslStream;
     private readonly bool _allowDelayedNegotiation;
-    private readonly SocketPipeConnectionOptions? _pipeOptions;
+    private readonly TransportConnectionOptions? _connectionOptions;
     private readonly Socket? _socket;
 
     private readonly Inlet<ITransportOutbound> _in = new("TcpServerConnection.In");
@@ -26,14 +26,14 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
         ConnectionInfo connectionInfo,
         SslStream? sslStream = null,
         bool allowDelayedNegotiation = false,
-        SocketPipeConnectionOptions? pipeOptions = null,
+        TransportConnectionOptions? connectionOptions = null,
         Socket? socket = null)
     {
         _stream = stream;
         _connectionInfo = connectionInfo;
         _sslStream = sslStream;
         _allowDelayedNegotiation = allowDelayedNegotiation;
-        _pipeOptions = pipeOptions;
+        _connectionOptions = connectionOptions;
         _socket = socket;
         Shape = new FlowShape<ITransportOutbound, ITransportInbound>(_in, _out);
     }
@@ -85,7 +85,7 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
             _sm = new TcpServerStateMachine(
                 this, stageActor.Ref, _stage._stream, _stage._connectionInfo,
                 _stage._sslStream, _stage._allowDelayedNegotiation,
-                _stage._pipeOptions, _stage._socket);
+                _stage._connectionOptions, _stage._socket);
             _sm.Start();
             Pull(_stage._in);
         }

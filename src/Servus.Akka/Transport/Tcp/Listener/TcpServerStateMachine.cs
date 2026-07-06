@@ -12,22 +12,48 @@ internal sealed class TcpServerStateMachine(
     ConnectionInfo connectionInfo,
     SslStream? sslStream = null,
     bool allowDelayedNegotiation = false,
-    SocketPipeConnectionOptions? pipeOptions = null,
-    Socket? socket = null)
+    TransportConnectionOptions? connectionOptions = null,
+    Socket? socket = null,
+    Func<IDuplexConnection>? connectionFactory = null)
 {
     private const int MaxSyncReads = 8;
 
-    private SocketPipeConnection? _connection;
+    private IDuplexConnection? _connection;
     private int _connectionGen;
     private bool _upstreamFinished;
     private int _syncReadBudget = MaxSyncReads;
 
+    // Outbound bytes handed to the connection's send queue that have not yet been reported flushed.
+    // Drives watermark backpressure: upstream is pulled only while this stays below the high mark.
+    private long _bytesInFlight;
+    private long _highWatermark = new TransportConnectionOptions().OutputHighWatermark;
+    private long _lowWatermark = new TransportConnectionOptions().OutputLowWatermark;
+
+    private bool _readInProgress;
+    private ReadEventState _readState = new(0);
+
+    /// <summary>TEST-ONLY. The cached read transforms for the current generation.</summary>
+    internal ReadEventState ReadState => _readState;
+
     public void Start()
     {
         _connectionGen++;
-        _connection = socket is not null && sslStream is null
-            ? SocketPipeConnection.Create(socket, pipeOptions)
-            : SocketPipeConnection.Create(stream, pipeOptions);
+        var gen = _connectionGen;
+        var options = connectionOptions ?? new TransportConnectionOptions();
+        _highWatermark = options.OutputHighWatermark;
+        _lowWatermark = options.OutputLowWatermark;
+
+        _connection = connectionFactory is not null
+            ? connectionFactory()
+            : socket is not null && sslStream is null
+                ? new RawSocketConnection(socket, options)
+                : new StreamConnection(stream, options);
+
+        _readState = new ReadEventState(gen);
+
+        // Assigned once per generation, before the first enqueue: the send loop reports each fully-sent
+        // batch back to this actor. Allocation-free per batch — the closure captures only self + gen.
+        _connection.OnFlushed = bytes => self.Tell(new SendFlushed(bytes, gen));
 
         if (sslStream is not null || allowDelayedNegotiation)
         {
@@ -51,12 +77,15 @@ internal sealed class TcpServerStateMachine(
             case ReadCompleted e:
                 if (e.Gen == _connectionGen)
                 {
+                    _readInProgress = false;
                     OnReadCompleted(e.Buffer);
                 }
                 else
                 {
                     // Stale read from a torn-down connection: the buffer is OWNED by this event
-                    // (rent-and-receive) — dropping it without dispose leaks the pooled array.
+                    // (rent-and-receive) — dropping it without dispose leaks the pooled array. A stale
+                    // event says nothing about the CURRENT gen's read, so _readInProgress is
+                    // deliberately left alone.
                     e.Buffer?.Dispose();
                 }
 
@@ -64,14 +93,15 @@ internal sealed class TcpServerStateMachine(
             case ReadFailed e:
                 if (e.Gen == _connectionGen)
                 {
+                    _readInProgress = false;
                     OnReadFailed(e.Error);
                 }
 
                 break;
-            case PipeFlushComplete e:
+            case SendFlushed e:
                 if (e.Gen == _connectionGen)
                 {
-                    ops.OnSignalPullOutbound();
+                    OnSendFlushed(e.Bytes);
                 }
 
                 break;
@@ -114,55 +144,53 @@ internal sealed class TcpServerStateMachine(
 
     public void RequestRead()
     {
-        if (_connection is null)
+        if (_connection is null || _readInProgress)
         {
             return;
         }
 
-        var gen = _connectionGen;
+        _readInProgress = true;
+
         var readTask = _connection.ReceiveAsync();
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
         {
             _syncReadBudget--;
+            _readInProgress = false;
             OnReadCompleted(readTask.Result);
             return;
         }
 
         _syncReadBudget = MaxSyncReads;
-        readTask.PipeTo(self,
-            success: buffer => new ReadCompleted(buffer, gen),
-            failure: ex => new ReadFailed(ex, gen));
+        readTask.PipeTo(self, success: _readState.ReadSuccess, failure: _readState.ReadFailure);
     }
 
     private void HandleTransportData(TransportData data)
     {
+        var buffer = data.Buffer;
+        data.Return();
+
         if (_connection is null)
         {
-            data.Buffer.Dispose();
-            data.Return();
+            buffer.Dispose();
             ops.OnSignalPullOutbound();
             return;
         }
 
-        var mem = _connection.OutputWriter.GetMemory(data.Buffer.Length);
-        data.Buffer.Memory.Span.CopyTo(mem.Span);
-        _connection.OutputWriter.Advance(data.Buffer.Length);
-        data.Buffer.Dispose();
-        data.Return();
+        if (!_connection.TryEnqueue(buffer))
+        {
+            buffer.Dispose();
+            OnInboundComplete(DisconnectReason.Error);
+            return;
+        }
 
-        var gen = _connectionGen;
-        var flush = _connection.OutputWriter.FlushAsync();
+        _bytesInFlight += buffer.Length;
 
-        if (flush.IsCompleted)
+        // Pull the next outbound item only while we are below the high watermark; otherwise pause and
+        // wait for SendFlushed to drain us back below the low watermark.
+        if (_bytesInFlight < _highWatermark)
         {
             ops.OnSignalPullOutbound();
-        }
-        else
-        {
-            flush.PipeTo(self,
-                success: _ => new PipeFlushComplete(gen),
-                failure: _ => new PipeFlushComplete(gen));
         }
     }
 
@@ -183,11 +211,25 @@ internal sealed class TcpServerStateMachine(
         OnInboundComplete(DisconnectReason.Error);
     }
 
+    private void OnSendFlushed(int bytes)
+    {
+        var before = _bytesInFlight;
+        _bytesInFlight -= bytes;
+
+        // Resume the outbound pull only on the edge where in-flight bytes just crossed below the low
+        // watermark, so a burst of small flushes doesn't fire a pull per batch.
+        if (before >= _lowWatermark && _bytesInFlight < _lowWatermark)
+        {
+            ops.OnSignalPullOutbound();
+        }
+    }
+
     private void OnInboundComplete(DisconnectReason reason)
     {
         ops.OnPushInbound(new TransportDisconnected(reason));
         DisposeConnection();
         _connection = null;
+        _bytesInFlight = 0;
 
         if (_upstreamFinished)
         {
@@ -202,6 +244,10 @@ internal sealed class TcpServerStateMachine(
     private void Cleanup()
     {
         _connectionGen++;
+        _readInProgress = false;
+        _readState = new ReadEventState(_connectionGen);
+        _bytesInFlight = 0;
+
         DisposeConnection();
         _connection = null;
         stream.Dispose();
@@ -211,6 +257,8 @@ internal sealed class TcpServerStateMachine(
     {
         if (_connection is not null)
         {
+            // Fire-and-forget: the connection cancels its receive internally and dispose-drains its
+            // outbound channel, so no dead-letter leak survives PostStop.
             _ = _connection.DisposeAsync();
         }
     }

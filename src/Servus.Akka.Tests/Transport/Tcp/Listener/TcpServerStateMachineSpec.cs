@@ -1,5 +1,6 @@
 using System.Net;
 using Akka.Actor;
+using Servus.Akka.Tests.Transport;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
@@ -19,6 +20,24 @@ public sealed class TcpServerStateMachineSpec
         var ops = new MockConnectionOperations();
         var sm = new TcpServerStateMachine(ops, ActorRefs.Nobody, stream ?? Stream.Null, TestConnectionInfo);
         return (sm, ops);
+    }
+
+    /// <summary>
+    /// Injects a <see cref="FakeDuplexConnection"/> via the SM's test-only <c>connectionFactory</c> seam
+    /// so watermark/enqueue/flush behavior can be observed deterministically — a real
+    /// <see cref="StreamConnection"/> over <see cref="Stream.Null"/> completes reads/writes
+    /// asynchronously on background tasks and cannot be raced against synchronously in a unit test.
+    /// </summary>
+    private static (TcpServerStateMachine Sm, MockConnectionOperations Ops, FakeDuplexConnection Connection)
+        CreateStateMachineWithFakeConnection()
+    {
+        var ops = new MockConnectionOperations();
+        var connection = new FakeDuplexConnection();
+        var sm = new TcpServerStateMachine(
+            ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
+            connectionFactory: () => connection);
+        sm.Start();
+        return (sm, ops, connection);
     }
 
     private static WireBuffer CreateTestBuffer(params byte[] data)
@@ -308,5 +327,128 @@ public sealed class TcpServerStateMachineSpec
 
         var disconnected = Assert.IsType<TransportDisconnected>(Assert.Single(ops.PushedInbound));
         Assert.Equal(DisconnectReason.Error, disconnected.Reason);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandleTransportData_should_enqueue_buffer_and_return_wrapper()
+    {
+        var (sm, _, connection) = CreateStateMachineWithFakeConnection();
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        var wrapper = TransportData.Rent(buffer);
+
+        sm.HandlePush(wrapper);
+
+        Assert.Contains(buffer, connection.Enqueued);
+        Assert.Null(wrapper.Buffer); // the wrapper was returned to the pool after the enqueue
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandlePush_above_high_watermark_should_not_pull_upstream()
+    {
+        var (sm, ops, connection) = CreateStateMachineWithFakeConnection();
+
+        var big = WireBuffer.Rent(512 * 1024);
+        big.Length = 512 * 1024;
+        var pullBefore = ops.PullOutboundCount;
+
+        sm.HandlePush(TransportData.Rent(big));
+
+        Assert.Contains(big, connection.Enqueued);
+        Assert.Equal(pullBefore, ops.PullOutboundCount); // at/above high watermark: no pull
+    }
+
+    [Fact(Timeout = 5000)]
+    public void SendFlushed_below_low_watermark_should_resume_pull()
+    {
+        var (sm, ops, _) = CreateStateMachineWithFakeConnection();
+
+        var big = WireBuffer.Rent(512 * 1024);
+        big.Length = 512 * 1024;
+        sm.HandlePush(TransportData.Rent(big)); // 512K in flight, at high watermark, no pull
+        var pullBefore = ops.PullOutboundCount;
+
+        // 512K - 300K = 212K, crossing below the 256K low watermark.
+        sm.Dispatch(new SendFlushed(300 * 1024, Gen: 1));
+
+        Assert.True(ops.PullOutboundCount > pullBefore);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void SendFlushed_stale_gen_should_be_ignored()
+    {
+        var (sm, ops, _) = CreateStateMachineWithFakeConnection();
+
+        var big = WireBuffer.Rent(512 * 1024);
+        big.Length = 512 * 1024;
+        sm.HandlePush(TransportData.Rent(big));
+        var pullBefore = ops.PullOutboundCount;
+
+        sm.Dispatch(new SendFlushed(300 * 1024, Gen: 999));
+
+        Assert.Equal(pullBefore, ops.PullOutboundCount);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void RequestRead_async_path_should_reuse_cached_transforms()
+    {
+        var (sm, ops, _) = CreateStateMachineWithFakeConnection();
+        sm.RequestRead(); // async read #1 parks on the fake connection
+
+        var success1 = sm.ReadState.ReadSuccess;
+        var failure1 = sm.ReadState.ReadFailure;
+
+        // Complete read #1 in the current gen so a second read can be issued.
+        var buffer = CreateTestBuffer(1);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 1));
+        ((TransportData)ops.PushedInbound[^1]).Buffer.Dispose();
+
+        sm.RequestRead(); // async read #2, same generation
+
+        Assert.Same(success1, sm.ReadState.ReadSuccess);
+        Assert.Same(failure1, sm.ReadState.ReadFailure);
+    }
+
+    // The fake connection's ReceiveAsync() returns a TCS-backed ValueTask that never completes,
+    // which itself models "a read is in flight" and never completes synchronously, so there is no
+    // fixture-level call counter to observe a second receive. The bug/fix under test is entirely
+    // captured by whether _readInProgress survives a stale-generation event, so that private flag
+    // (inspected via reflection, no production seam added) is the observable assertion here.
+    [Fact(Timeout = 5000)]
+    public void Dispatch_stale_ReadCompleted_should_not_clear_read_in_progress()
+    {
+        var (sm, ops, _) = CreateStateMachineWithFakeConnection();
+
+        // RequestRead parks on the inert fake connection's ReceiveAsync() — a read is now in flight.
+        sm.RequestRead();
+
+        Assert.True(GetReadInProgress(sm));
+
+        var staleBuffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(staleBuffer, Gen: 0));
+
+        // The stale event (gen 0, current gen is 1) must not clear the in-flight flag for the
+        // current-gen read, and it must dispose its own rented buffer.
+        Assert.True(GetReadInProgress(sm));
+        Assert.Equal(0, staleBuffer.Capacity);
+
+        ops.PushedInbound.Clear();
+        var pullBefore = ops.PullOutboundCount;
+
+        // Simulating the next downstream pull: with the flag still set, this must be a no-op —
+        // no second receive is issued and no inbound/pull side effects occur.
+        sm.RequestRead();
+
+        Assert.True(GetReadInProgress(sm));
+        Assert.Empty(ops.PushedInbound);
+        Assert.Equal(pullBefore, ops.PullOutboundCount);
+    }
+
+    private static bool GetReadInProgress(TcpServerStateMachine sm)
+    {
+        var field = typeof(TcpServerStateMachine).GetField(
+            "_readInProgress",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (bool)field.GetValue(sm)!;
     }
 }
