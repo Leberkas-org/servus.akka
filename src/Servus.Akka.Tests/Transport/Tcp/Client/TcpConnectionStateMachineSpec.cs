@@ -629,4 +629,50 @@ public sealed class TcpConnectionStateMachineSpec
         var disconnected = Assert.IsType<TransportDisconnected>(Assert.Single(ops.PushedInbound));
         Assert.Equal(DisconnectReason.Graceful, disconnected.Reason);
     }
+
+    // The inert connection (SocketPipeConnection.CreateInert) is not reentrant-instrumented: its
+    // ReceiveAsync() parks on Task.Delay(Timeout.Infinite) forever, which itself models "a read is
+    // in flight" and never completes synchronously, so there is no fixture-level call counter to
+    // observe a second receive. The bug/fix under test is entirely captured by whether
+    // _readInProgress survives a stale-generation event, so that private flag (inspected via
+    // reflection, no production seam added) is the observable assertion here.
+    [Fact(Timeout = 5000)]
+    public void Dispatch_stale_ReadCompleted_should_not_clear_read_in_progress()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease();
+
+        // Acquiring the lease bumps the generation to 1 and immediately calls RequestRead(),
+        // which parks on the inert connection's ReceiveAsync() — a read is now in flight for gen 1.
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        Assert.True(GetReadInProgress(sm));
+
+        var staleBuffer = CreateTestBuffer(1, 2, 3);
+        sm.Dispatch(new ReadCompleted(staleBuffer, Gen: 0));
+
+        // The stale event (gen 0, current gen is 1) must not clear the in-flight flag for the
+        // current-gen read, and it must dispose its own rented buffer.
+        Assert.True(GetReadInProgress(sm));
+        Assert.Equal(0, staleBuffer.Capacity);
+
+        ops.PushedInbound.Clear();
+        var pullBefore = ops.PullOutboundCount;
+
+        // Simulating the next downstream pull: with the flag still set, this must be a no-op —
+        // no second receive is issued and no inbound/pull side effects occur.
+        sm.RequestRead();
+
+        Assert.True(GetReadInProgress(sm));
+        Assert.Empty(ops.PushedInbound);
+        Assert.Equal(pullBefore, ops.PullOutboundCount);
+    }
+
+    private static bool GetReadInProgress(TcpConnectionStateMachine sm)
+    {
+        var field = typeof(TcpConnectionStateMachine).GetField(
+            "_readInProgress",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (bool)field.GetValue(sm)!;
+    }
 }

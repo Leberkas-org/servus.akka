@@ -43,23 +43,25 @@ public sealed class TcpConnectionStateMachine(
                 OnAcquisitionFailed(e.Error);
                 break;
             case ReadCompleted e:
-                _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
+                    _readInProgress = false;
                     OnReadCompleted(e.Buffer);
                 }
                 else
                 {
                     // Stale read from a torn-down/reconnected lease: the buffer is OWNED by this
-                    // event (rent-and-receive) — dispose or it leaks the pooled array.
+                    // event (rent-and-receive) — dispose or it leaks the pooled array. A stale
+                    // event says nothing about the CURRENT gen's read, so _readInProgress is
+                    // deliberately left alone.
                     e.Buffer?.Dispose();
                 }
 
                 break;
             case ReadFailed e:
-                _readInProgress = false;
                 if (e.Gen == _connectionGen)
                 {
+                    _readInProgress = false;
                     OnReadFailed(e.Error);
                 }
 
