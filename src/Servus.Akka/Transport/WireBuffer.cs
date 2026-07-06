@@ -65,6 +65,12 @@ public sealed class WireBuffer : IMemoryOwner<byte>
             throw new ArgumentException("WireBuffer.Wrap requires an array-backed owner.", nameof(owner));
         }
 
+        if (offset < 0 || length < 0 || offset + length > seg.Count)
+        {
+            throw new ArgumentOutOfRangeException(nameof(length),
+                "Wrapped range exceeds the owner's memory.");
+        }
+
         var buf = Wrap(seg.Array!, seg.Offset + offset, length);
         buf._externalOwner = owner;
         return buf;

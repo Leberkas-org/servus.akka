@@ -88,6 +88,39 @@ public sealed class WireBufferSpec
         buf2.Dispose();
     }
 
+    [Fact(Timeout = 5000)]
+    public void Wrap_owner_beyond_logical_length_should_throw()
+    {
+        var outerArray = new byte[64];
+        var owner = new SubsliceMemoryOwner(outerArray.AsMemory(8, 16));
+
+        var ex = Assert.Throws<ArgumentOutOfRangeException>(
+            () => WireBuffer.Wrap(owner, 0, 32));
+
+        Assert.Equal("length", ex.ParamName);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Wrap_owner_with_nonzero_segment_offset_should_expose_correct_bytes()
+    {
+        var outerArray = new byte[64];
+        for (int i = 0; i < outerArray.Length; i++)
+        {
+            outerArray[i] = (byte)(0x10 + i);
+        }
+
+        var owner = new SubsliceMemoryOwner(outerArray.AsMemory(8, 16));
+        var buf = WireBuffer.Wrap(owner, 2, 4);
+
+        Assert.Equal(4, buf.Memory.Length);
+        Assert.Equal(outerArray[10], buf.Span[0]);
+        Assert.Equal(outerArray[11], buf.Span[1]);
+        Assert.Equal(outerArray[12], buf.Span[2]);
+        Assert.Equal(outerArray[13], buf.Span[3]);
+
+        buf.Dispose();
+    }
+
     private sealed class TrackingMemoryOwner(int size) : IMemoryOwner<byte>
     {
         private readonly byte[] _array = new byte[size];
@@ -97,5 +130,14 @@ public sealed class WireBufferSpec
         public Memory<byte> Memory => _array;
 
         public void Dispose() => Disposed = true;
+    }
+
+    private sealed class SubsliceMemoryOwner(Memory<byte> memory) : IMemoryOwner<byte>
+    {
+        public Memory<byte> Memory => memory;
+
+        public void Dispose()
+        {
+        }
     }
 }
