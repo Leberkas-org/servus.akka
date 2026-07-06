@@ -11,6 +11,14 @@ internal sealed class SocketAwaitable()
     private ManualResetValueTaskSourceCore<int> _core;
     private List<ArraySegment<byte>>? _bufferList;
 
+    /// <summary>
+    /// TEST-ONLY seam. When set, no single socket operation is handed more than this many bytes, which
+    /// forces the caller's partial-send remainder loop to iterate deterministically (real short sends,
+    /// not timing-dependent). Unset in production; the guard is a single nullable branch per send with
+    /// no allocation or extra syscall on the hot path.
+    /// </summary>
+    internal int? MaxBytesPerSendForTest;
+
     public ValueTask<int> ReceiveAsync(Socket socket, Memory<byte> buffer)
     {
         _core.Reset();
@@ -50,7 +58,13 @@ internal sealed class SocketAwaitable()
             BufferList = null;
         }
 
-        SetBuffer(MemoryMarshal.AsMemory(buffer));
+        var toSend = MemoryMarshal.AsMemory(buffer);
+        if (MaxBytesPerSendForTest is int cap && toSend.Length > cap)
+        {
+            toSend = toSend[..cap];
+        }
+
+        SetBuffer(toSend);
         if (socket.SendAsync(this))
         {
             return new ValueTask<int>(this, _core.Version);
@@ -158,7 +172,10 @@ internal sealed class SocketAwaitable()
         var list = _bufferList ??= new List<ArraySegment<byte>>();
         list.Clear();
 
-        for (var i = startIndex; i < buffers.Count; i++)
+        // TEST-ONLY: cap total bytes handed to the kernel so the SendManyAsync remainder loop iterates.
+        var budget = MaxBytesPerSendForTest ?? int.MaxValue;
+
+        for (var i = startIndex; i < buffers.Count && budget > 0; i++)
         {
             var buffer = buffers[i];
             if (buffer.Length == 0)
@@ -171,14 +188,15 @@ internal sealed class SocketAwaitable()
                 throw new InvalidOperationException("Send buffer segment is not backed by an array.");
             }
 
-            if (i == startIndex && startOffset > 0)
+            var segOffset = i == startIndex ? array.Offset + startOffset : array.Offset;
+            var segCount = i == startIndex ? array.Count - startOffset : array.Count;
+            if (segCount > budget)
             {
-                list.Add(new ArraySegment<byte>(array.Array!, array.Offset + startOffset, array.Count - startOffset));
+                segCount = budget;
             }
-            else
-            {
-                list.Add(array);
-            }
+
+            list.Add(new ArraySegment<byte>(array.Array!, segOffset, segCount));
+            budget -= segCount;
         }
 
         // SocketAsyncEventArgs forbids Buffer and BufferList being set at once; clear any single buffer

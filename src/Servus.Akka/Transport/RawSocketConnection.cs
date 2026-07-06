@@ -1,5 +1,6 @@
 using System.Net.Sockets;
 using System.Threading.Channels;
+using static Servus.Senf;
 
 namespace Servus.Akka.Transport;
 
@@ -21,27 +22,66 @@ internal sealed class RawSocketConnection : IDuplexConnection
         Eof,
     }
 
+    /// <summary>
+    /// One atomically-published unit of receive state: the presence of the reference is itself the
+    /// "receive active" flag, and it carries that receive's terminal settlement. Folding both into a
+    /// single reference swapped with <see cref="Interlocked"/> means <see cref="QuiesceAsync"/> can
+    /// never observe an active receive paired with a STALE settle from a prior receive.
+    /// </summary>
+    private sealed class ReceiveSession
+    {
+        public readonly TaskCompletionSource<ReceiveOutcome> Settle =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
     private readonly Socket _socket;
     private readonly SocketAwaitable _receiver = new();
     private readonly SocketAwaitable _sender = new();
     private readonly Channel<WireBuffer> _channel;
     private readonly Task _sendLoop;
     private readonly CancellationTokenSource _lifetimeCts;
+    private readonly Task? _sendLoopStartGate;
 
     private CancellationTokenSource _receiveCts;
-    private TaskCompletionSource<ReceiveOutcome>? _receiveSettle;
+    private ReceiveSession? _receiveSession;
     private int _receiveHint;
     private int _shrinkStreak;
-    private int _receiveActive;
+    private long _vectoredSendCount;
 
     public Action<int>? OnFlushed { get; set; }
 
+    /// <summary>
+    /// TEST-ONLY. Number of vectored (multi-buffer) send batches drained by the loop. Lets a test assert
+    /// the coalescing path actually ran rather than the batch degenerating into single sends.
+    /// </summary>
+    internal long VectoredSendCount => Interlocked.Read(ref _vectoredSendCount);
+
+    /// <summary>
+    /// TEST-ONLY. Caps bytes per underlying socket send on the send loop's sender so partial-send
+    /// remainder math is exercised deterministically. Null (default) leaves the hot path untouched.
+    /// </summary>
+    internal int? MaxBytesPerSendForTest
+    {
+        set => _sender.MaxBytesPerSendForTest = value;
+    }
+
     public RawSocketConnection(Socket socket, TransportConnectionOptions options)
+        : this(socket, options, sendLoopStartGate: null)
+    {
+    }
+
+    /// <summary>
+    /// TEST-ONLY constructor. <paramref name="sendLoopStartGate"/>, when non-null, is awaited once by the
+    /// send loop before its first drain, so a test can enqueue N buffers while the loop is parked and
+    /// guarantee they coalesce into a single vectored send.
+    /// </summary>
+    internal RawSocketConnection(Socket socket, TransportConnectionOptions options, Task? sendLoopStartGate)
     {
         _socket = socket;
         _receiveHint = options.ReceiveBufferHint;
         _receiveCts = new CancellationTokenSource();
         _lifetimeCts = new CancellationTokenSource();
+        _sendLoopStartGate = sendLoopStartGate;
 
         _channel = Channel.CreateUnbounded<WireBuffer>(new UnboundedChannelOptions
         {
@@ -61,14 +101,16 @@ internal sealed class RawSocketConnection : IDuplexConnection
 
     public async ValueTask<WireBuffer?> ReceiveAsync()
     {
-        if (Interlocked.Exchange(ref _receiveActive, 1) == 1)
+        // Publishing the session IS the reentrancy guard: a session already present means a receive is in
+        // flight. One atomic swap installs both the "active" flag and this receive's settlement together,
+        // so QuiesceAsync always reads a self-consistent pair.
+        var session = new ReceiveSession();
+        if (Interlocked.CompareExchange(ref _receiveSession, session, null) is not null)
         {
             throw new InvalidOperationException(
                 "Concurrent ReceiveAsync — the connection supports one outstanding receive.");
         }
 
-        var settle = new TaskCompletionSource<ReceiveOutcome>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _receiveSettle = settle;
         var token = _receiveCts.Token;
         var outcome = ReceiveOutcome.Faulted;
 
@@ -109,32 +151,41 @@ internal sealed class RawSocketConnection : IDuplexConnection
         }
         finally
         {
-            Volatile.Write(ref _receiveActive, 0);
-            settle.TrySetResult(outcome);
+            // Clear the active flag before settling so a QuiesceAsync awaiter that wakes on the settle can
+            // start the next receive; it holds its own reference to this session, so the clear is safe.
+            Volatile.Write(ref _receiveSession, null);
+            session.Settle.TrySetResult(outcome);
         }
     }
 
     public bool TryEnqueue(WireBuffer buffer) => _channel.Writer.TryWrite(buffer);
 
+    /// <remarks>
+    /// Single-caller contract: <see cref="QuiesceAsync"/> and <see cref="DisposeAsync"/> are never invoked
+    /// concurrently with each other or with themselves. The receive-CTS swap below still uses an atomic
+    /// exchange so the fresh token is safely published to a subsequent <see cref="ReceiveAsync"/> and the
+    /// old CTS is disposed exactly once.
+    /// </remarks>
     public async ValueTask<bool> QuiesceAsync()
     {
-        // Only await settlement if a receive is genuinely in flight; otherwise the stored settle task
-        // belongs to a prior (already consumed) receive and would report a stale outcome.
-        var settle = Volatile.Read(ref _receiveActive) == 1 ? _receiveSettle : null;
+        // One read of the session gives an atomically-consistent (active + settle) pair: either there is a
+        // receive in flight and we own its settlement, or there is none. No stale-outcome window.
+        var session = Volatile.Read(ref _receiveSession);
+        var current = _receiveCts;
 
-        await _receiveCts.CancelAsync();
+        await current.CancelAsync();
 
         var clean = true;
-        if (settle is not null)
+        if (session is not null)
         {
-            var outcome = await settle.Task;
+            var outcome = await session.Settle.Task;
             clean = outcome == ReceiveOutcome.Cancelled;
         }
 
-        // A cancelled CTS is single-use; swap in a fresh one so the next ReceiveAsync works after a
-        // clean quiesce. On the not-clean path the caller disposes us anyway; the swap is harmless.
-        _receiveCts.Dispose();
-        _receiveCts = new CancellationTokenSource();
+        // A cancelled CTS is single-use; swap in a fresh one so the next ReceiveAsync works after a clean
+        // quiesce. On the not-clean path the caller disposes us anyway; the swap is harmless.
+        Interlocked.Exchange(ref _receiveCts, new CancellationTokenSource());
+        current.Dispose();
         return clean;
     }
 
@@ -150,6 +201,13 @@ internal sealed class RawSocketConnection : IDuplexConnection
 
         try
         {
+            // TEST-ONLY park: lets a test enqueue a whole batch before the first drain so the buffers
+            // coalesce into one vectored send. Null in production.
+            if (_sendLoopStartGate is not null)
+            {
+                await _sendLoopStartGate;
+            }
+
             while (await reader.WaitToReadAsync(ct))
             {
                 batch.Clear();
@@ -163,9 +221,16 @@ internal sealed class RawSocketConnection : IDuplexConnection
                     continue;
                 }
 
-                var total = batch.Count == 1
-                    ? await SendSingleAsync(batch[0])
-                    : await _sender.SendManyAsync(_socket, batch);
+                int total;
+                if (batch.Count == 1)
+                {
+                    total = await SendSingleAsync(batch[0]);
+                }
+                else
+                {
+                    Interlocked.Increment(ref _vectoredSendCount);
+                    total = await _sender.SendManyAsync(_socket, batch);
+                }
 
                 for (var i = 0; i < batch.Count; i++)
                 {
@@ -173,7 +238,17 @@ internal sealed class RawSocketConnection : IDuplexConnection
                 }
 
                 batch.Clear();
-                OnFlushed?.Invoke(total);
+
+                // A consumer callback must never fault the send loop — swallow and trace so one bad
+                // OnFlushed handler cannot tear down the connection's outbound side.
+                try
+                {
+                    OnFlushed?.Invoke(total);
+                }
+                catch (Exception ex)
+                {
+                    Tracing.For("Transport").Warning(this, "OnFlushed callback threw: {0}", ex);
+                }
             }
         }
         catch (Exception ex) when (ConnectionErrors.IsTeardown(ex))
@@ -214,9 +289,11 @@ internal sealed class RawSocketConnection : IDuplexConnection
         return memory.Length;
     }
 
+    /// <remarks>Single-caller contract — see <see cref="QuiesceAsync"/>. Not safe to call concurrently.</remarks>
     public async ValueTask DisposeAsync()
     {
-        await _receiveCts.CancelAsync();
+        var receiveCts = _receiveCts;
+        await receiveCts.CancelAsync();
         await _lifetimeCts.CancelAsync();
 
         try
@@ -241,7 +318,7 @@ internal sealed class RawSocketConnection : IDuplexConnection
             // noop
         }
 
-        _receiveCts.Dispose();
+        receiveCts.Dispose();
         _lifetimeCts.Dispose();
     }
 }

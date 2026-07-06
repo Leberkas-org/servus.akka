@@ -157,6 +157,129 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_single_large_buffer_short_sent_should_arrive_complete_and_in_order()
+    {
+        // Single-buffer path (SendSingleAsync): cap each socket send well below the buffer length so the
+        // partial-send remainder loop must iterate. The cap makes this deterministic, not timing-dependent.
+        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions())
+        {
+            MaxBytesPerSendForTest = 7000,
+        };
+
+        var flushed = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.OnFlushed = total => flushed.TrySetResult(total);
+
+        var payload = new byte[100 * 1024];
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i % 251);
+        }
+
+        Assert.True(connection.TryEnqueue(MakeBuffer(payload)));
+
+        var received = await ReceiveExactlyFromServerAsync(payload.Length, TestContext.Current.CancellationToken);
+        Assert.Equal(payload, received);
+
+        var flushedTotal = await flushed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(payload.Length, flushedTotal);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_many_short_sent_mid_buffer_should_arrive_complete_and_in_order()
+    {
+        // Vectored path with the send capped mid-buffer (1500 does not align to the 1024-byte segments),
+        // exercising the (advance < available) branch of the remainder cursor.
+        await VerifyVectoredDelivery(bufferSize: 1024, bufferCount: 10, maxBytesPerSend: 1500);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_many_short_sent_at_buffer_boundary_should_arrive_complete_and_in_order()
+    {
+        // Vectored path with the send capped at an exact multiple of the segment size, exercising the
+        // (advance == available) boundary branch of the remainder cursor.
+        await VerifyVectoredDelivery(bufferSize: 1024, bufferCount: 10, maxBytesPerSend: 2 * 1024);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_many_with_paused_start_should_coalesce_into_single_vectored_send()
+    {
+        // Deterministic vectored coverage: park the send loop, enqueue every buffer, then release. All
+        // buffers are guaranteed in the channel before the first drain, so they coalesce into one batch.
+        await VerifyVectoredDelivery(bufferSize: 1024, bufferCount: 10, maxBytesPerSend: null);
+    }
+
+    private async Task VerifyVectoredDelivery(int bufferSize, int bufferCount, int? maxBytesPerSend)
+    {
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions(), gate.Task)
+        {
+            MaxBytesPerSendForTest = maxBytesPerSend,
+        };
+
+        var total = bufferSize * bufferCount;
+        var totalFlushed = 0;
+        var allFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        connection.OnFlushed = sent =>
+        {
+            if (Interlocked.Add(ref totalFlushed, sent) >= total)
+            {
+                allFlushed.TrySetResult();
+            }
+        };
+
+        var expected = new byte[total];
+        for (var i = 0; i < bufferCount; i++)
+        {
+            var chunk = new byte[bufferSize];
+            for (var j = 0; j < chunk.Length; j++)
+            {
+                chunk[j] = (byte)((i * bufferSize + j) % 251);
+            }
+
+            Array.Copy(chunk, 0, expected, i * bufferSize, bufferSize);
+            Assert.True(connection.TryEnqueue(MakeBuffer(chunk)));
+        }
+
+        // Release the parked send loop only after every buffer is queued so the drain coalesces them.
+        gate.SetResult();
+
+        var received = await ReceiveExactlyFromServerAsync(expected.Length, TestContext.Current.CancellationToken);
+        Assert.Equal(expected, received);
+
+        await allFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(total, Volatile.Read(ref totalFlushed));
+        Assert.True(connection.VectoredSendCount >= 1,
+            $"Expected at least one vectored send, saw {connection.VectoredSendCount}.");
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task OnFlushed_that_throws_should_not_fault_the_send_loop()
+    {
+        // A faulting consumer callback must be swallowed so subsequent sends still complete.
+        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions());
+
+        var secondFlushed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var invocations = 0;
+        connection.OnFlushed = _ =>
+        {
+            if (Interlocked.Increment(ref invocations) == 1)
+            {
+                throw new InvalidOperationException("boom");
+            }
+
+            secondFlushed.TrySetResult();
+        };
+
+        Assert.True(connection.TryEnqueue(MakeBuffer("first"u8.ToArray())));
+        await ReceiveExactlyFromServerAsync(5, TestContext.Current.CancellationToken);
+
+        Assert.True(connection.TryEnqueue(MakeBuffer("second"u8.ToArray())));
+        await ReceiveExactlyFromServerAsync(6, TestContext.Current.CancellationToken);
+
+        await secondFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task QuiesceAsync_should_cancel_idle_probe_and_return_true()
     {
         await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions());
