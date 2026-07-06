@@ -46,7 +46,7 @@ internal sealed class QuicListenerStage
         private readonly QuicListenerStage _stage;
         private readonly TaskCompletionSource<int> _boundSignal;
         private readonly Queue<Flow<ITransportOutbound, ITransportInbound, NotUsed>> _pendingConnections = new();
-        private readonly SocketPipeConnectionOptions _pipeOptions;
+        private readonly TransportConnectionOptions _connectionOptions;
         private QuicListener? _listener;
         private IActorRef _self = null!;
         private CancellationTokenSource? _cts;
@@ -55,7 +55,7 @@ internal sealed class QuicListenerStage
         {
             _stage = stage;
             _boundSignal = boundSignal;
-            _pipeOptions = SocketPipeConnectionOptions.FromListener(stage._options);
+            _connectionOptions = TransportConnectionOptions.FromListener(stage._options);
 
             SetHandler(stage._out, onPull: () => TryPush());
         }
@@ -238,7 +238,7 @@ internal sealed class QuicListenerStage
                 dispose: () => connection.DisposeAsync());
 
             var connectionFlow = Flow.FromGraph(
-                new QuicServerConnectionStage(handle, connectionInfo, _pipeOptions));
+                new QuicServerConnectionStage(handle, connectionInfo, _connectionOptions));
 
             _pendingConnections.Enqueue(connectionFlow);
             TryPush();

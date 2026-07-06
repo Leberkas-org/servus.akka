@@ -43,18 +43,17 @@ public sealed class QuicTransportStateMachineSpec
         return (ops, sm);
     }
 
-    private static DirectStreamReadComplete CreateReadEvent(QuicStreamState state, byte[] data)
+    private static StreamReceiveCompleted CreateReadEvent(QuicStreamState state, byte[] data)
     {
         var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        state.BeginDirectRead(buf);
-        return new DirectStreamReadComplete(state, data.Length);
+        return new StreamReceiveCompleted(state, buf);
     }
 
-    private static DirectStreamReadComplete CreateCompletedReadEvent(QuicStreamState state)
+    private static StreamReceiveCompleted CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new DirectStreamReadComplete(state, 0);
+        return new StreamReceiveCompleted(state, null);
     }
 
     private static QuicStreamState CreateDetachedStreamState(long streamId)
@@ -148,9 +147,8 @@ public sealed class QuicTransportStateMachineSpec
 
         sm.Dispatch(evt);
 
+        // The stale completion is dropped (stream no longer present) and its buffer released.
         Assert.Empty(ops.PushedInbound);
-        Assert.Null(state.PendingReadBuffer);
-        Assert.False(state.ReadInFlight);
     }
 
     [Fact(Timeout = 5000)]
@@ -334,7 +332,7 @@ public sealed class QuicTransportStateMachineSpec
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        sm.Dispatch(new PipeStreamReadFailed(CreateDetachedStreamState(1), new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(CreateDetachedStreamState(1), new IOException("Read failed")));
 
         Assert.Empty(ops.PushedInbound);
     }
@@ -490,7 +488,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);
@@ -510,7 +508,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(state,
+        sm.Dispatch(new StreamReceiveFailed(state,
             new System.Net.Quic.QuicException(System.Net.Quic.QuicError.StreamAborted, null, "aborted")));
 
         var completed = ops.PushedInbound.OfType<StreamReadCompleted>().FirstOrDefault();
@@ -640,7 +638,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(
+        sm.Dispatch(new StreamReceiveFailed(
             state, new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
@@ -670,7 +668,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
         ops.Completed = false;
 
-        sm.Dispatch(new PipeStreamReadFailed(
+        sm.Dispatch(new StreamReceiveFailed(
             CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
@@ -696,7 +694,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
         ops.PullCount = 0;
 
-        sm.Dispatch(new PipeStreamReadFailed(
+        sm.Dispatch(new StreamReceiveFailed(
             CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
@@ -744,7 +742,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);

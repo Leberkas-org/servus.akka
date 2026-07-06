@@ -146,9 +146,12 @@ internal sealed class StreamConnection : IDuplexConnection
                 outcome = ReceiveOutcome.Cancelled;
                 throw;
             }
-            catch (QuicException ex) when (_quicAware && IsGracefulQuicClose(ex))
+            catch (QuicException) when (_quicAware)
             {
-                // Peer closed/reset the stream (FIN/STOP_SENDING/RST_STREAM) — graceful completion, EOF.
+                // ANY QuicException on a quic-aware read maps to graceful EOF, matching the pre-migration
+                // state-machine behavior (both QUIC SMs treated every QuicException on read as
+                // DisconnectReason.Graceful — peer FIN/STOP_SENDING/RST_STREAM). Narrowing to specific
+                // QuicError codes was deliberately rejected to preserve behavior during the migration.
                 buffer.Dispose();
                 outcome = ReceiveOutcome.Eof;
                 return null;
@@ -233,6 +236,31 @@ internal sealed class StreamConnection : IDuplexConnection
                     continue;
                 }
 
+                // QUIC: once the peer has closed our write side (STOP_SENDING), any WriteAsync throws
+                // QuicException(StreamAborted). Report 0 flushed for the skipped bytes and STOP the send
+                // loop entirely — the outbound side is dead — matching the old RunQuicSendLoop break. The
+                // finally drains and disposes anything still queued.
+                if (_quicAware && _stream is QuicStream q && q.WritesClosed.IsCompleted)
+                {
+                    for (var i = 0; i < batch.Count; i++)
+                    {
+                        batch[i].Dispose();
+                    }
+
+                    batch.Clear();
+
+                    try
+                    {
+                        OnFlushed?.Invoke(0);
+                    }
+                    catch (Exception ex)
+                    {
+                        Tracing.For("Transport").Warning(this, "OnFlushed callback threw: {0}", ex);
+                    }
+
+                    break;
+                }
+
                 var total = await WriteBatchAsync(batch, ct);
 
                 for (var i = 0; i < batch.Count; i++)
@@ -273,19 +301,6 @@ internal sealed class StreamConnection : IDuplexConnection
 
     private async ValueTask<int> WriteBatchAsync(List<WireBuffer> batch, CancellationToken ct)
     {
-        // QUIC: once the peer has closed our write side (STOP_SENDING), any WriteAsync throws
-        // QuicException(StreamAborted). Skip the whole batch and let the buffers be disposed by the caller.
-        if (_quicAware && _stream is QuicStream q && q.WritesClosed.IsCompleted)
-        {
-            var skipped = 0;
-            for (var i = 0; i < batch.Count; i++)
-            {
-                skipped += batch[i].Length;
-            }
-
-            return skipped;
-        }
-
         var total = 0;
         var allSmall = batch.Count > 1;
         for (var i = 0; i < batch.Count; i++)
@@ -329,12 +344,6 @@ internal sealed class StreamConnection : IDuplexConnection
         await _stream.FlushAsync(ct);
         return total;
     }
-
-    private static bool IsGracefulQuicClose(QuicException ex) =>
-        ex.QuicError is QuicError.StreamAborted
-            or QuicError.ConnectionAborted
-            or QuicError.ConnectionIdle
-            or QuicError.OperationAborted;
 
     /// <remarks>Single-caller contract — see <see cref="QuiesceAsync"/>. Not safe to call concurrently.</remarks>
     public async ValueTask DisposeAsync()

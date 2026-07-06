@@ -1,4 +1,4 @@
-using System.Buffers;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using Akka.Actor;
 using static Servus.Senf;
@@ -8,7 +8,7 @@ namespace Servus.Akka.Transport.Quic.Client;
 public sealed class QuicTransportStateMachine(
     IConnectionOperations ops,
     IActorRef connectionManager,
-    IActorRef self)
+    IActorRef self) : IQuicStreamReadHost
 {
     private const string ConnectTimerKey = "connect-timeout";
     private const string MigrationCheckTimerKey = "migration-check";
@@ -19,7 +19,7 @@ public sealed class QuicTransportStateMachine(
     private QuicConnectionLease? _connectionLease;
     private ConnectTransport? _pendingConnect;
     private bool _autoReconnect;
-    private SocketPipeConnectionOptions? _pipeOptions;
+    private TransportConnectionOptions? _transportOptions;
     private bool _upstreamFinished;
     private bool _isReconnecting;
     private CancellationTokenSource? _acquireCts;
@@ -27,8 +27,29 @@ public sealed class QuicTransportStateMachine(
     private EndPoint? _lastRemoteEndPoint;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
-    private readonly HashSet<StreamTarget> _dirtyStreams = [];
     private int _syncReadBudget = MaxSyncReads;
+
+    IConnectionOperations IQuicStreamReadHost.Ops => ops;
+
+    bool IQuicStreamReadHost.TryGetStream(StreamTarget id, [MaybeNullWhen(false)] out QuicStreamState state)
+        => _streams.TryGetValue(id, out state);
+
+    void IQuicStreamReadHost.RequestStreamRead(StreamTarget streamId) => RequestStreamRead(streamId);
+
+    void IQuicStreamReadHost.OnInboundComplete(DisconnectReason reason, long rawStreamId)
+        => OnInboundComplete(reason, rawStreamId);
+
+    void IQuicStreamReadHost.OnReadFailure(QuicStreamState state, Exception error)
+    {
+        if (IsConnectionLevelError(error))
+        {
+            HandleConnectionFailure(DisconnectReason.Error);
+        }
+        else
+        {
+            OnInboundComplete(DisconnectReason.Error, state.StreamId);
+        }
+    }
 
     internal void Dispatch(IQuicTransportEvent evt)
     {
@@ -43,14 +64,11 @@ public sealed class QuicTransportStateMachine(
             case AcquisitionFailed e:
                 OnAcquisitionFailed(e.Error);
                 break;
-            case DirectStreamReadComplete e:
-                OnDirectStreamReadComplete(e);
+            case StreamReceiveCompleted e:
+                QuicStreamReads.OnReceiveCompleted(this, e.State, e.Buffer);
                 break;
-            case PipeStreamReadResult e:
-                OnPipeStreamReadResult(e);
-                break;
-            case PipeStreamReadFailed e:
-                OnPipeStreamReadFailed(e);
+            case StreamReceiveFailed e:
+                QuicStreamReads.OnReceiveFailed(this, e.State, e.Error);
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
@@ -138,7 +156,7 @@ public sealed class QuicTransportStateMachine(
             _autoReconnect = quicOpts.AutoReconnect;
         }
 
-        _pipeOptions = SocketPipeConnectionOptions.FromTransport(connect.Options);
+        _transportOptions = TransportConnectionOptions.FromTransport(connect.Options);
 
         if (_connectionLease is not null)
         {
@@ -159,7 +177,7 @@ public sealed class QuicTransportStateMachine(
             return;
         }
 
-        var state = QuicStreamState.Rent(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _transportOptions);
         _streams[streamId] = state;
 
         var sid = streamId.Value;
@@ -175,10 +193,7 @@ public sealed class QuicTransportStateMachine(
     {
         if (_streams.TryGetValue(data.StreamId, out var state))
         {
-            if (state.Write(data.Buffer))
-            {
-                _dirtyStreams.Add(data.StreamId);
-            }
+            state.Write(data.Buffer);
         }
         else
         {
@@ -187,24 +202,6 @@ public sealed class QuicTransportStateMachine(
 
         data.Return();
         ops.OnSignalPullOutbound();
-    }
-
-    public void FlushBatch()
-    {
-        if (_dirtyStreams.Count == 0)
-        {
-            return;
-        }
-
-        foreach (var sid in _dirtyStreams)
-        {
-            if (_streams.TryGetValue(sid, out var s))
-            {
-                _ = s.FlushWrites();
-            }
-        }
-
-        _dirtyStreams.Clear();
     }
 
     private void HandleCompleteWrites(StreamTarget streamId)
@@ -282,7 +279,7 @@ public sealed class QuicTransportStateMachine(
         var direction = (rawStreamId & 0x02) != 0
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
-        var state = QuicStreamState.Rent(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _transportOptions);
         state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
@@ -293,7 +290,7 @@ public sealed class QuicTransportStateMachine(
     internal QuicStreamState RegisterTestStream(long streamId, StreamDirection direction)
     {
         var target = StreamTarget.FromId(streamId);
-        var state = QuicStreamState.Rent(direction, _pipeOptions);
+        var state = QuicStreamState.Rent(direction, _transportOptions);
         state.ActivateWithoutConnection();
         state.ActivateDirectReadForTest(streamId);
         _streams[target] = state;
@@ -302,139 +299,29 @@ public sealed class QuicTransportStateMachine(
 
     private void RequestStreamRead(StreamTarget streamId)
     {
-        if (!_streams.TryGetValue(streamId, out var state))
+        if (!_streams.TryGetValue(streamId, out var state) || !state.IsAttached)
         {
             return;
         }
 
-        if (state.QuicStream is { } qs)
+        // Peer already closed the read side of the QuicStream — nothing more will arrive.
+        if (state.QuicStream is { ReadsClosed.IsCompleted: true })
         {
-            if (qs.ReadsClosed.IsCompleted)
-            {
-                OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
-                return;
-            }
-
-            var buf = WireBuffer.Rent(state.ReadHint);
-            state.BeginDirectRead(buf);
-            qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
-                success: state.DirectReadTransform,
-                failure: state.FailureReadTransform);
+            OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
             return;
         }
 
-        if (state.InputReader is null)
-        {
-            return;
-        }
-
-        var reader = state.InputReader;
-
-        if (state.PendingAdvance is { } pos)
-        {
-            state.PendingAdvance = null;
-            reader.AdvanceTo(pos);
-        }
-
-        var readTask = reader.ReadAsync();
+        var readTask = state.ReceiveAsync();
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
         {
             _syncReadBudget--;
-            ProcessPipeReadResult(state, readTask.Result);
+            QuicStreamReads.OnReceiveCompleted(this, state, readTask.Result);
             return;
         }
 
         _syncReadBudget = MaxSyncReads;
-        state.BeginPipeRead();
-        readTask.PipeTo(self,
-            success: state.PipeReadTransform,
-            failure: state.FailureReadTransform);
-    }
-
-    private void OnDirectStreamReadComplete(DirectStreamReadComplete evt)
-    {
-        var state = evt.State;
-        if (!state.CompleteRead(out var buf))
-        {
-            // Stream torn down while the read was in flight; the pending buffer is released.
-            return;
-        }
-
-        if (evt.BytesRead == 0 || buf is null)
-        {
-            buf?.Dispose();
-            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
-            return;
-        }
-
-        buf.Length = evt.BytesRead;
-        state.AdaptReadHint(evt.BytesRead);
-        var streamId = StreamTarget.FromId(state.StreamId);
-        ops.OnPushInbound(MultiplexedData.Rent(buf, streamId));
-        RequestStreamRead(streamId);
-    }
-
-    private void OnPipeStreamReadResult(PipeStreamReadResult evt)
-    {
-        if (!evt.State.CompleteRead(out _))
-        {
-            return;
-        }
-
-        ProcessPipeReadResult(evt.State, evt.Result);
-    }
-
-    private void ProcessPipeReadResult(QuicStreamState state, System.IO.Pipelines.ReadResult result)
-    {
-        var streamId = StreamTarget.FromId(state.StreamId);
-
-        if (result.Buffer.Length > 0)
-        {
-            var length = (int)result.Buffer.Length;
-            var buf = WireBuffer.Rent(length);
-            result.Buffer.CopyTo(buf.FullMemory.Span);
-            buf.Length = length;
-            ops.OnPushInbound(MultiplexedData.Rent(buf, streamId));
-        }
-
-        // Deferred like the TCP read pump: AdvanceTo runs on the actor right before the next
-        // ReadAsync, so the pipe's internal buffers are never touched from an IO thread.
-        state.PendingAdvance = result.Buffer.End;
-
-        if (result.IsCompleted || result.IsCanceled)
-        {
-            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
-            return;
-        }
-
-        RequestStreamRead(streamId);
-    }
-
-    private void OnPipeStreamReadFailed(PipeStreamReadFailed evt)
-    {
-        var state = evt.State;
-        if (!state.CompleteRead(out _))
-        {
-            return;
-        }
-
-        // QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/
-        // RST_STREAM) — a graceful stream completion, not an error to propagate.
-        if (evt.Error is System.Net.Quic.QuicException)
-        {
-            OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
-            return;
-        }
-
-        if (IsConnectionLevelError(evt.Error))
-        {
-            HandleConnectionFailure(DisconnectReason.Error);
-        }
-        else
-        {
-            OnInboundComplete(DisconnectReason.Error, state.StreamId);
-        }
+        readTask.PipeTo(self, success: state.ReadSuccess, failure: state.ReadFailure);
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)

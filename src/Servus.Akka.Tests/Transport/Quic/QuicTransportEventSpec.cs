@@ -48,26 +48,42 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void DirectStreamReadComplete_should_carry_State_and_BytesRead()
+    public void StreamReceiveCompleted_should_carry_State_and_Buffer()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(42);
 
-        var evt = new DirectStreamReadComplete(state, 4);
+        var buf = WireBuffer.Rent(4);
+        buf.Length = 4;
+        var evt = new StreamReceiveCompleted(state, buf);
 
         Assert.Same(state, evt.State);
-        Assert.Equal(4, evt.BytesRead);
+        Assert.Same(buf, evt.Buffer);
         Assert.Equal(42, evt.State.StreamId);
+
+        buf.Dispose();
     }
 
     [Fact(Timeout = 5000)]
-    public void PipeStreamReadFailed_should_carry_State_and_Error()
+    public void StreamReceiveCompleted_should_allow_null_buffer_for_eof()
+    {
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        state.ActivateDirectReadForTest(1);
+
+        var evt = new StreamReceiveCompleted(state, null);
+
+        Assert.Same(state, evt.State);
+        Assert.Null(evt.Buffer);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void StreamReceiveFailed_should_carry_State_and_Error()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(789);
         var error = new IOException("Read failed");
 
-        var evt = new PipeStreamReadFailed(state, error);
+        var evt = new StreamReceiveFailed(state, error);
 
         Assert.Same(error, evt.Error);
         Assert.Same(state, evt.State);

@@ -48,7 +48,7 @@ public sealed class QuicStreamDisposalSpec
         var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new DirectStreamReadComplete(state, 0));
+        sm.Dispatch(new StreamReceiveCompleted(state, null));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -66,7 +66,7 @@ public sealed class QuicStreamDisposalSpec
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new DirectStreamReadComplete(state, 0));
+        sm.Dispatch(new StreamReceiveCompleted(state, null));
         Assert.Equal(0, sm.ActiveStreamCount);
     }
 
@@ -97,7 +97,7 @@ public sealed class QuicStreamDisposalSpec
         Assert.Equal(1, sm.ActiveStreamCount);
         Assert.Contains(ops.PushedInbound, item => item is ServerStreamAccepted { Id.Value: 4 });
 
-        sm.Dispatch(new DirectStreamReadComplete(sm.GetStreamForTest(4)!, 0));
+        sm.Dispatch(new StreamReceiveCompleted(sm.GetStreamForTest(4)!, null));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -120,7 +120,7 @@ public sealed class QuicStreamDisposalSpec
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new DirectStreamReadComplete(sm.GetStreamForTest(4)!, 0));
+        sm.Dispatch(new StreamReceiveCompleted(sm.GetStreamForTest(4)!, null));
         Assert.Equal(0, sm.ActiveStreamCount);
 
         await trackingStream.WaitForDisposalAsync();
@@ -144,7 +144,7 @@ public sealed class QuicStreamDisposalSpec
         for (var i = 0; i < 150; i++)
         {
             var streamId = i * 4;
-            sm.Dispatch(new DirectStreamReadComplete(states[streamId], 0));
+            sm.Dispatch(new StreamReceiveCompleted(states[streamId], null));
             sm.HandlePush(new CompleteWrites(streamId));
         }
 

@@ -127,8 +127,7 @@ public sealed class QuicConnectionMigrationSpec
         var buf = WireBuffer.Rent(4);
         new byte[] { 1, 2, 3, 4 }.CopyTo(buf.FullMemory.Span);
         buf.Length = 4;
-        state.BeginDirectRead(buf);
-        sm.Dispatch(new DirectStreamReadComplete(state, 4));
+        sm.Dispatch(new StreamReceiveCompleted(state, buf));
 
         Assert.DoesNotContain(ops.PushedInbound, i => i is ConnectionMigrationDetected);
 

@@ -48,18 +48,17 @@ public sealed class QuicServerStateMachineSpec
         return buf;
     }
 
-    private static DirectStreamReadComplete CreateReadEvent(QuicStreamState state, byte[] data)
+    private static StreamReceiveCompleted CreateReadEvent(QuicStreamState state, byte[] data)
     {
         var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        state.BeginDirectRead(buf);
-        return new DirectStreamReadComplete(state, data.Length);
+        return new StreamReceiveCompleted(state, buf);
     }
 
-    private static DirectStreamReadComplete CreateCompletedReadEvent(QuicStreamState state)
+    private static StreamReceiveCompleted CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new DirectStreamReadComplete(state, 0);
+        return new StreamReceiveCompleted(state, null);
     }
 
     [Fact(Timeout = 5000)]
@@ -186,9 +185,8 @@ public sealed class QuicServerStateMachineSpec
 
         sm.Dispatch(evt);
 
+        // The stale completion is dropped (stream no longer present) and its buffer released.
         Assert.Empty(ops.PushedInbound);
-        Assert.Null(state.PendingReadBuffer);
-        Assert.False(state.ReadInFlight);
     }
 
     [Fact(Timeout = 5000)]
@@ -309,7 +307,7 @@ public sealed class QuicServerStateMachineSpec
         var state = sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new PipeStreamReadFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
 
         Assert.Contains(ops.PushedInbound,
             item => item is StreamClosed { Id.Value: 1, Reason: DisconnectReason.Error });

@@ -17,4 +17,11 @@ internal sealed record TransportConnectionOptions
         OutputHighWatermark = listener.OutputPauseThreshold,
         OutputLowWatermark = listener.OutputResumeThreshold,
     };
+
+    internal static TransportConnectionOptions FromTransport(TransportOptions transport) => new()
+    {
+        ReceiveBufferHint = transport.ReceiveBufferHint,
+        OutputHighWatermark = transport.OutputPauseThreshold,
+        OutputLowWatermark = transport.OutputResumeThreshold,
+    };
 }

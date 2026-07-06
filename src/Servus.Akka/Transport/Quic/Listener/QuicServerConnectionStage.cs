@@ -9,7 +9,7 @@ internal sealed class QuicServerConnectionStage : GraphStage<FlowShape<ITranspor
 {
     private readonly QuicConnectionHandle _connectionHandle;
     private readonly ConnectionInfo _connectionInfo;
-    private readonly SocketPipeConnectionOptions? _pipeOptions;
+    private readonly TransportConnectionOptions? _connectionOptions;
 
     private readonly Inlet<ITransportOutbound> _in = new("QuicServerConnection.In");
     private readonly Outlet<ITransportInbound> _out = new("QuicServerConnection.Out");
@@ -19,11 +19,11 @@ internal sealed class QuicServerConnectionStage : GraphStage<FlowShape<ITranspor
     public QuicServerConnectionStage(
         QuicConnectionHandle connectionHandle,
         ConnectionInfo connectionInfo,
-        SocketPipeConnectionOptions? pipeOptions = null)
+        TransportConnectionOptions? connectionOptions = null)
     {
         _connectionHandle = connectionHandle;
         _connectionInfo = connectionInfo;
-        _pipeOptions = pipeOptions;
+        _connectionOptions = connectionOptions;
         Shape = new FlowShape<ITransportOutbound, ITransportInbound>(_in, _out);
     }
 
@@ -68,7 +68,7 @@ internal sealed class QuicServerConnectionStage : GraphStage<FlowShape<ITranspor
                 stageActor.Ref,
                 _stage._connectionHandle,
                 _stage._connectionInfo,
-                _stage._pipeOptions);
+                _stage._connectionOptions);
             _sm.Start();
             Pull(_stage._in);
         }
