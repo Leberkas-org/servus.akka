@@ -7,16 +7,23 @@ namespace Servus.Akka.Transport;
 
 internal sealed class SocketPipeConnection : IAsyncDisposable
 {
-    private readonly Pipe _inputPipe = null!;
+    private readonly Pipe? _inputPipe;
     private readonly Pipe _outputPipe;
     private readonly Task _receiveLoop;
     private readonly Task _sendLoop;
     private readonly CancellationTokenSource _cts;
     private readonly Socket? _socket;
     private readonly PipeReader? _directInputReader;
+    private readonly Stream? _receiveStream;
+    private readonly SocketAwaitable? _receiver;
+    private readonly bool _waitForData;
+    private int _receiveHint;
+    private int _shrinkStreak;
 
-
-    public PipeReader InputReader => _directInputReader ?? _inputPipe.Reader;
+    public PipeReader InputReader =>
+        _directInputReader
+        ?? _inputPipe?.Reader
+        ?? throw new InvalidOperationException("TCP connections receive via ReceiveAsync().");
     public PipeWriter OutputWriter => _outputPipe.Writer;
 
     internal static SocketPipeConnection CreateInert()
@@ -63,6 +70,25 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         _receiveLoop = Task.CompletedTask;
     }
 
+    private SocketPipeConnection(
+        Socket? socket,
+        Stream? receiveStream,
+        Pipe outputPipe,
+        Task sendLoop,
+        CancellationTokenSource cts,
+        SocketPipeConnectionOptions opts)
+    {
+        _socket = socket;
+        _receiveStream = receiveStream;
+        _receiver = socket is not null ? new SocketAwaitable() : null;
+        _outputPipe = outputPipe;
+        _sendLoop = sendLoop;
+        _cts = cts;
+        _waitForData = opts.WaitForData;
+        _receiveHint = opts.ReceiveBufferHint;
+        _receiveLoop = Task.CompletedTask;
+    }
+
     public static SocketPipeConnection CreateForQuic(QuicStream stream, SocketPipeConnectionOptions? options = null)
     {
         var opts = options ?? new SocketPipeConnectionOptions();
@@ -94,20 +120,10 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     {
         var opts = options ?? new SocketPipeConnectionOptions();
 
-        // One batched IOQueue shard per connection drives both transport-side schedulers (the input
-        // writer = receive loop, the output reader = send loop); the application side stays on the
-        // ThreadPool. This caps scheduler fan-out and batches socket wakeups instead of paying one
-        // ThreadPool item per pipe continuation.
+        // Inbound is direct rent-and-receive (ReceiveAsync) — no input pipe, no receive loop. The
+        // kernel socket buffer is the read-ahead; an unread backlog closes the TCP window, which is
+        // the inbound backpressure. Only the outbound side still runs through a pipe + send loop.
         var ioQueue = IOQueue.GetNext();
-
-        var inputPipe = new Pipe(new PipeOptions(
-            pool: CrossThreadMemoryPool.Instance,
-            readerScheduler: PipeScheduler.ThreadPool,
-            writerScheduler: ioQueue,
-            minimumSegmentSize: opts.MinimumSegmentSize,
-            pauseWriterThreshold: opts.InputPauseWriterThreshold,
-            resumeWriterThreshold: opts.InputResumeWriterThreshold,
-            useSynchronizationContext: false));
 
         var outputPipe = new Pipe(new PipeOptions(
             pool: CrossThreadMemoryPool.Instance,
@@ -124,30 +140,16 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         // Do NOT pass `ct` as the second argument to Task.Run: if DisposeAsync cancels the token
         // before the thread pool starts the delegate, Task.Run(f, ct) cancels the task without ever
         // running the body, so the loop's teardown catch + finally never run and DisposeAsync's
-        // Task.WhenAll surfaces a TaskCanceledException. The loops already observe `ct` internally
-        // and shut down cleanly; the stream overload below relies on the same contract.
-        var receiveLoop = Task.Run(() => RunSocketReceiveLoop(socket, inputPipe.Writer, opts, ct));
+        // await surfaces a TaskCanceledException. The loop already observes `ct` internally.
         var sendLoop = Task.Run(() => RunSocketSendLoop(socket, outputPipe.Reader, ct));
 
-        return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts, socket);
+        return new SocketPipeConnection(socket, receiveStream: null, outputPipe, sendLoop, cts, opts);
     }
 
     public static SocketPipeConnection Create(Stream stream, SocketPipeConnectionOptions? options = null)
     {
         var opts = options ?? new SocketPipeConnectionOptions();
-
-        // Same batched-scheduler model as the socket path (see Create(Socket)): the stream read/write
-        // loops are the transport side and run on a per-connection IOQueue shard.
         var ioQueue = IOQueue.GetNext();
-
-        var inputPipe = new Pipe(new PipeOptions(
-            pool: CrossThreadMemoryPool.Instance,
-            readerScheduler: PipeScheduler.ThreadPool,
-            writerScheduler: ioQueue,
-            minimumSegmentSize: opts.MinimumSegmentSize,
-            pauseWriterThreshold: opts.InputPauseWriterThreshold,
-            resumeWriterThreshold: opts.InputResumeWriterThreshold,
-            useSynchronizationContext: false));
 
         var outputPipe = new Pipe(new PipeOptions(
             pool: CrossThreadMemoryPool.Instance,
@@ -161,10 +163,9 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         var cts = new CancellationTokenSource();
         var ct = cts.Token;
 
-        var receiveLoop = Task.Run(() => RunStreamReceiveLoop(stream, inputPipe.Writer, opts, ct));
         var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, ct));
 
-        return new SocketPipeConnection(inputPipe, outputPipe, receiveLoop, sendLoop, cts);
+        return new SocketPipeConnection(socket: null, stream, outputPipe, sendLoop, cts, opts);
     }
 
     private static bool IsTeardownException(Exception ex) =>
@@ -198,95 +199,49 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         }
     }
 
-    private static async Task RunSocketReceiveLoop(
-        Socket socket,
-        PipeWriter writer,
-        SocketPipeConnectionOptions options,
-        CancellationToken ct)
+    /// <summary>
+    /// Receives once, directly into a rented <see cref="TransportBuffer"/> owned by the caller.
+    /// Returns null on EOF. Not reentrant: at most one outstanding call per connection — the
+    /// state machines' pull discipline guarantees this. On failure the rent is disposed here
+    /// and the exception propagates.
+    /// </summary>
+    public async ValueTask<TransportBuffer?> ReceiveAsync()
     {
-        var receiver = new SocketAwaitable();
-        var currentHint = options.ReceiveBufferHint;
-        var shrinkStreak = 0;
+        if (_socket is null && _receiveStream is null)
+        {
+            // Inert connection (tests): park until disposed, mirroring a pipe read that never
+            // completes. Cancellation surfaces as a teardown-classified exception.
+            await Task.Delay(Timeout.Infinite, _cts.Token);
+            return null;
+        }
 
+        if (_socket is not null && _waitForData)
+        {
+            // Zero-byte receive before renting so idle connections don't pin a rented buffer.
+            await _receiver!.WaitForDataAsync(_socket);
+        }
+
+        var buffer = TransportBuffer.Rent(_receiveHint);
         try
         {
-            while (!ct.IsCancellationRequested)
+            var bytesRead = _socket is not null
+                ? await _receiver!.ReceiveAsync(_socket, buffer.FullMemory)
+                : await _receiveStream!.ReadAsync(buffer.FullMemory, _cts.Token);
+
+            if (bytesRead == 0)
             {
-                if (options.WaitForData)
-                {
-                    await receiver.WaitForDataAsync(socket);
-                }
-
-                var buffer = writer.GetMemory(currentHint);
-                var bytesRead = await receiver.ReceiveAsync(socket, buffer);
-
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-
-                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
-
-                writer.Advance(bytesRead);
-                var flushTask = writer.FlushAsync(ct);
-                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
-
-                if (flush.IsCompleted || flush.IsCanceled)
-                {
-                    break;
-                }
+                buffer.Dispose();
+                return null;
             }
+
+            buffer.Length = bytesRead;
+            AdaptHint(bytesRead, ref _receiveHint, ref _shrinkStreak);
+            return buffer;
         }
-        catch (Exception ex) when (IsTeardownException(ex))
+        catch
         {
-            // noop
-        }
-        finally
-        {
-            await writer.CompleteAsync();
-        }
-    }
-
-    private static async Task RunStreamReceiveLoop(
-        Stream stream,
-        PipeWriter writer,
-        SocketPipeConnectionOptions options,
-        CancellationToken ct)
-    {
-        var currentHint = options.ReceiveBufferHint;
-        var shrinkStreak = 0;
-
-        try
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var buffer = writer.GetMemory(currentHint);
-                var bytesRead = await stream.ReadAsync(buffer, ct);
-
-                if (bytesRead == 0)
-                {
-                    break;
-                }
-
-                AdaptHint(bytesRead, ref currentHint, ref shrinkStreak);
-
-                writer.Advance(bytesRead);
-                var flushTask = writer.FlushAsync(ct);
-                var flush = flushTask.IsCompletedSuccessfully ? flushTask.Result : await flushTask;
-
-                if (flush.IsCompleted || flush.IsCanceled)
-                {
-                    break;
-                }
-            }
-        }
-        catch (Exception ex) when (IsTeardownException(ex))
-        {
-            // noop
-        }
-        finally
-        {
-            await writer.CompleteAsync();
+            buffer.Dispose();
+            throw;
         }
     }
 
@@ -472,17 +427,15 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         if (_directInputReader is not null)
         {
             await _directInputReader.CompleteAsync();
-            _outputPipe.Reader.CancelPendingRead();
-            await _outputPipe.Writer.CompleteAsync();
-            await _sendLoop;
         }
         else
         {
-            _inputPipe.Writer.CancelPendingFlush();
-            _outputPipe.Reader.CancelPendingRead();
-            await _outputPipe.Writer.CompleteAsync();
-            await Task.WhenAll(_receiveLoop, _sendLoop);
+            _inputPipe?.Writer.CancelPendingFlush();
         }
+
+        _outputPipe.Reader.CancelPendingRead();
+        await _outputPipe.Writer.CompleteAsync();
+        await Task.WhenAll(_receiveLoop, _sendLoop);
 
         _cts.Dispose();
     }

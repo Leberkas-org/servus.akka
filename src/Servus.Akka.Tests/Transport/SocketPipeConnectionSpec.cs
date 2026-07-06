@@ -31,18 +31,126 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
-    public async Task InputReader_should_receive_socket_data()
+    public async Task ReceiveAsync_should_receive_socket_data()
     {
         await using var connection = SocketPipeConnection.Create(_client);
 
         var sent = "hello from server"u8.ToArray();
         await _server.SendAsync(sent, SocketFlags.None, TestContext.Current.CancellationToken);
 
-        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
-        var received = System.Text.Encoding.UTF8.GetString(result.Buffer.FirstSpan);
-        connection.InputReader.AdvanceTo(result.Buffer.End);
+        var buffer = await connection.ReceiveAsync();
 
-        Assert.Equal("hello from server", received);
+        Assert.NotNull(buffer);
+        Assert.Equal("hello from server", System.Text.Encoding.UTF8.GetString(buffer.Span));
+        buffer.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ReceiveAsync_should_receive_with_wait_for_data()
+    {
+        var options = new SocketPipeConnectionOptions { WaitForData = true };
+        await using var connection = SocketPipeConnection.Create(_client, options);
+
+        var receiveTask = connection.ReceiveAsync().AsTask();
+        await _server.SendAsync("late data"u8.ToArray(), SocketFlags.None, TestContext.Current.CancellationToken);
+
+        var buffer = await receiveTask;
+
+        Assert.NotNull(buffer);
+        Assert.Equal("late data", System.Text.Encoding.UTF8.GetString(buffer.Span));
+        buffer.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ReceiveAsync_should_return_null_on_socket_close()
+    {
+        await using var connection = SocketPipeConnection.Create(_client);
+
+        _server.Shutdown(SocketShutdown.Send);
+
+        var buffer = await connection.ReceiveAsync();
+
+        Assert.Null(buffer);
+    }
+
+    [Fact(Timeout = 10000)]
+    public async Task ReceiveAsync_should_drain_kernel_backlog_sequentially()
+    {
+        // Replaces the pipe-threshold backpressure test: with direct reads the backlog lives in
+        // the kernel socket buffer; sequential ReceiveAsync calls must drain it completely.
+        await using var connection = SocketPipeConnection.Create(_client);
+
+        var payload = new byte[256 * 1024];
+        for (var i = 0; i < payload.Length; i++)
+        {
+            payload[i] = (byte)(i % 251);
+        }
+
+        var sendTask = _server.SendAsync(payload, SocketFlags.None, TestContext.Current.CancellationToken).AsTask();
+
+        var total = 0;
+        while (total < payload.Length)
+        {
+            var buffer = await connection.ReceiveAsync();
+            Assert.NotNull(buffer);
+            for (var i = 0; i < buffer.Length; i++)
+            {
+                Assert.Equal((byte)((total + i) % 251), buffer.Span[i]);
+            }
+
+            total += buffer.Length;
+            buffer.Dispose();
+        }
+
+        Assert.Equal(payload.Length, total);
+        await sendTask;
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task ReceiveAsync_with_stream_should_work_for_tls()
+    {
+        var stream = new NetworkStream(_client, ownsSocket: false);
+        await using var connection = SocketPipeConnection.Create(stream);
+
+        var sent = "stream data"u8.ToArray();
+        await _server.SendAsync(sent, SocketFlags.None, TestContext.Current.CancellationToken);
+
+        var buffer = await connection.ReceiveAsync();
+
+        Assert.NotNull(buffer);
+        Assert.Equal("stream data", System.Text.Encoding.UTF8.GetString(buffer.Span));
+        buffer.Dispose();
+
+        // Output direction still works (send loop untouched)
+        var outData = "stream reply"u8.ToArray();
+        await connection.OutputWriter.WriteAsync(outData, TestContext.Current.CancellationToken);
+
+        var replyBuffer = new byte[1024];
+        var bytesReceived = await _server.ReceiveAsync(replyBuffer, SocketFlags.None, TestContext.Current.CancellationToken);
+        Assert.Equal("stream reply", System.Text.Encoding.UTF8.GetString(replyBuffer, 0, bytesReceived));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task DisposeAsync_should_fault_or_null_a_pending_receive()
+    {
+        var connection = SocketPipeConnection.Create(_client);
+
+        var receiveTask = connection.ReceiveAsync().AsTask();
+        await connection.DisposeAsync();
+
+        // Teardown may surface as a classified fault or a clean EOF depending on timing;
+        // it must never hang and never leak (a non-null result is owned by us → dispose).
+        try
+        {
+            var buffer = await receiveTask;
+            buffer?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            Assert.True(
+                ex is SocketException or ObjectDisposedException or OperationCanceledException or IOException,
+                $"Unexpected exception type: {ex.GetType()}");
+        }
     }
 
     [Fact(Timeout = 5000)]
@@ -57,76 +165,6 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
         var received = await _server.ReceiveAsync(buffer, SocketFlags.None, TestContext.Current.CancellationToken);
 
         Assert.Equal("hello from client", System.Text.Encoding.UTF8.GetString(buffer, 0, received));
-    }
-
-    [Fact(Timeout = 5000)]
-    public async Task InputReader_should_complete_on_socket_close()
-    {
-        await using var connection = SocketPipeConnection.Create(_client);
-
-        _server.Shutdown(SocketShutdown.Send);
-
-        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
-
-        Assert.True(result.IsCompleted);
-        Assert.True(result.Buffer.IsEmpty);
-        connection.InputReader.AdvanceTo(result.Buffer.End);
-    }
-
-    [Fact(Timeout = 10000)]
-    public async Task Backpressure_should_pause_socket_reads_when_pipe_full()
-    {
-        var options = new SocketPipeConnectionOptions
-        {
-            InputPauseWriterThreshold = 1024,
-            InputResumeWriterThreshold = 512,
-            WaitForData = false
-        };
-
-        await using var connection = SocketPipeConnection.Create(_client, options);
-
-        // Send 2KB which exceeds the 1KB pause threshold
-        var payload = new byte[2 * 1024];
-        Array.Fill(payload, (byte)'X');
-        await _server.SendAsync(payload, SocketFlags.None, TestContext.Current.CancellationToken);
-
-        // Give the receive loop time to read and hit backpressure
-        await Task.Delay(200, TestContext.Current.CancellationToken);
-
-        // Read data from the pipe to verify it arrived
-        var totalRead = 0L;
-        while (totalRead < payload.Length)
-        {
-            var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
-            totalRead += result.Buffer.Length;
-            connection.InputReader.AdvanceTo(result.Buffer.End);
-        }
-
-        Assert.Equal(payload.Length, totalRead);
-    }
-
-    [Fact(Timeout = 5000)]
-    public async Task Create_with_stream_should_work_for_tls()
-    {
-        var stream = new NetworkStream(_client, ownsSocket: false);
-        await using var connection = SocketPipeConnection.Create(stream);
-
-        var sent = "stream data"u8.ToArray();
-        await _server.SendAsync(sent, SocketFlags.None, TestContext.Current.CancellationToken);
-
-        var result = await connection.InputReader.ReadAsync(TestContext.Current.CancellationToken);
-        var received = System.Text.Encoding.UTF8.GetString(result.Buffer.FirstSpan);
-        connection.InputReader.AdvanceTo(result.Buffer.End);
-
-        Assert.Equal("stream data", received);
-
-        // Verify output direction works too
-        var outData = "stream reply"u8.ToArray();
-        await connection.OutputWriter.WriteAsync(outData, TestContext.Current.CancellationToken);
-
-        var buffer = new byte[1024];
-        var bytesReceived = await _server.ReceiveAsync(buffer, SocketFlags.None, TestContext.Current.CancellationToken);
-        Assert.Equal("stream reply", System.Text.Encoding.UTF8.GetString(buffer, 0, bytesReceived));
     }
 
     [Fact(Timeout = 5000)]
