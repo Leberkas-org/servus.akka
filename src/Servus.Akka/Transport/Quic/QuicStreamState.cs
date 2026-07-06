@@ -222,7 +222,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
         }
         else
         {
-            _connection = SocketPipeConnection.Create(stream, _pipeOptions);
+            _connection = SocketPipeConnection.CreateWithStreamReader(stream, _pipeOptions);
             _cachedReader = _connection.InputReader;
         }
 

@@ -116,6 +116,37 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
         return new SocketPipeConnection(fallbackReader, outputPipe, sendLoop, cts);
     }
 
+    // QUIC stream states can attach plain (non-QuicStream) streams — e.g. transformed or test
+    // streams — and read them through the pipe-based InputReader path. TCP's direct
+    // rent-and-receive mode does not apply there, so this factory keeps the StreamPipeReader
+    // mechanism CreateForQuic uses, paired with the generic stream send loop.
+    internal static SocketPipeConnection CreateWithStreamReader(Stream stream, SocketPipeConnectionOptions? options = null)
+    {
+        var opts = options ?? new SocketPipeConnectionOptions();
+        var ioQueue = IOQueue.GetNext();
+
+        var reader = PipeReader.Create(stream, new StreamPipeReaderOptions(
+            pool: CrossThreadMemoryPool.Instance,
+            bufferSize: opts.MinimumSegmentSize,
+            leaveOpen: true));
+
+        var outputPipe = new Pipe(new PipeOptions(
+            pool: CrossThreadMemoryPool.Instance,
+            readerScheduler: ioQueue,
+            writerScheduler: PipeScheduler.ThreadPool,
+            minimumSegmentSize: opts.MinimumSegmentSize,
+            pauseWriterThreshold: opts.OutputPauseWriterThreshold,
+            resumeWriterThreshold: opts.OutputResumeWriterThreshold,
+            useSynchronizationContext: false));
+
+        var cts = new CancellationTokenSource();
+
+        // See Create(Socket) for why ct is NOT passed to Task.Run itself.
+        var sendLoop = Task.Run(() => RunStreamSendLoop(stream, outputPipe.Reader, cts.Token));
+
+        return new SocketPipeConnection(reader, outputPipe, sendLoop, cts);
+    }
+
     public static SocketPipeConnection Create(Socket socket, SocketPipeConnectionOptions? options = null)
     {
         var opts = options ?? new SocketPipeConnectionOptions();
