@@ -12,6 +12,8 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
     internal sealed record Release(ConnectionLease Lease, bool CanReuse);
 
+    internal sealed record Quiesced(ConnectionLease Lease, bool Clean);
+
     private sealed record Established(ConnectionLease Lease, Acquire Original);
 
     private sealed record EstablishFailed(Exception Ex, Acquire Original);
@@ -65,6 +67,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
         Receive<Acquire>(OnAcquire);
         Receive<Release>(OnRelease);
+        Receive<Quiesced>(OnQuiesced);
         Receive<Established>(OnEstablished);
         Receive<EstablishFailed>(OnFailed);
         Receive<Evict>(_ => OnEvict());
@@ -131,15 +134,77 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
             return;
         }
 
+        // Quiesce before the lease becomes acquirable: the releasing consumer may still have a
+        // receive in flight on this connection. Handing it out with that operation pending is the
+        // corruption + byte-loss path — the lease only reaches Idle/Pending via Quiesced(clean).
+        var lease = msg.Lease;
+        ValueTask<bool> quiesce;
+        try
+        {
+            quiesce = lease.Connection.QuiesceAsync();
+        }
+        catch
+        {
+            HandleQuiesced(host, lease, clean: false);
+            return;
+        }
+
+        // Sanctioned sync fast-path: an idle connection with no receive in flight quiesces
+        // synchronously; complete the reuse inline so a subsequent Acquire in the same mailbox pass
+        // observes the pooled lease deterministically. Only a genuinely in-flight receive defers.
+        if (quiesce.IsCompletedSuccessfully)
+        {
+            HandleQuiesced(host, lease, quiesce.Result);
+            return;
+        }
+
+        QuiesceLease(quiesce).PipeTo(Self, success: clean => new Quiesced(lease, clean));
+    }
+
+    private void OnQuiesced(Quiesced msg)
+    {
+        var options = FindHostKey(msg.Lease);
+
+        if (options is null || !_hosts.TryGetValue(options, out var host))
+        {
+            msg.Lease.Dispose();
+            return;
+        }
+
+        HandleQuiesced(host, msg.Lease, msg.Clean);
+    }
+
+    private void HandleQuiesced(HostState host, ConnectionLease lease, bool clean)
+    {
+        if (!clean || !lease.IsAlive())
+        {
+            host.Leases.Remove(lease);
+            lease.Dispose();
+            ServeNextPending(host);
+            return;
+        }
+
         while (host.Pending.TryDequeue(out var pending))
         {
-            if (!pending.Tcs.Task.IsCompleted && pending.Tcs.TrySetResult(msg.Lease))
+            if (!pending.Tcs.Task.IsCompleted && pending.Tcs.TrySetResult(lease))
             {
                 return;
             }
         }
 
-        host.Idle.Push(msg.Lease);
+        host.Idle.Push(lease);
+    }
+
+    private static async Task<bool> QuiesceLease(ValueTask<bool> quiesce)
+    {
+        try
+        {
+            return await quiesce;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private void OnEstablished(Established msg)

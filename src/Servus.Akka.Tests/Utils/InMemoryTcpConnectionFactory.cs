@@ -14,7 +14,7 @@ internal sealed class InMemoryTcpConnectionFactory(TimeProvider? timeProvider = 
     {
         ct.ThrowIfCancellationRequested();
 
-        var connection = SocketPipeConnection.Create(Stream.Null);
+        var connection = new StreamConnection(Stream.Null, new TransportConnectionOptions());
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, ConnectionInfo.None, timeProvider);
 

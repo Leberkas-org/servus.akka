@@ -1,6 +1,7 @@
 using Akka.Actor;
 using Akka.TestKit.Xunit;
 using Microsoft.Extensions.Time.Testing;
+using Servus.Akka.Tests.Transport;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
@@ -667,6 +668,82 @@ public sealed class TcpConnectionManagerActorSpec : TestKit
         foreach (var lease in leases)
         {
             Assert.False(lease.IsAlive());
+        }
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Release_with_reuse_should_quiesce_before_pooling()
+    {
+        var factory = new RecordingFakeFactory();
+        var registry = new PoolConfigRegistry(DefaultPoolConfig with { MaxConnectionsPerHost = 1 });
+        var actor = Sys.ActorOf(TransportFactory.CreateTcpConnectionManager(factory, registry));
+        var options = CreateOptions();
+
+        var lease1 = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        actor.Tell(new TcpConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        // Max=1 and lease1 is still counted, so a fresh Acquire cannot establish — and it must NOT
+        // reuse lease1 either, until the in-flight receive quiesces clean.
+        var pending = TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        await Task.Delay(100, TestContext.Current.CancellationToken);
+        Assert.False(pending.IsCompleted);
+
+        factory.Connections[0].CompleteQuiesce(clean: true);
+
+        var reused = await pending.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+        Assert.Same(lease1, reused);
+
+        reused.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Release_with_dirty_quiesce_should_dispose_not_pool()
+    {
+        var factory = new RecordingFakeFactory();
+        var registry = new PoolConfigRegistry(DefaultPoolConfig with { MaxConnectionsPerHost = 1 });
+        var actor = Sys.ActorOf(TransportFactory.CreateTcpConnectionManager(factory, registry));
+        var options = CreateOptions();
+
+        var lease1 = await TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        actor.Tell(new TcpConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        var pending = TcpConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        // A dirty quiesce means the release raced live data/EOF: dispose the lease and serve the
+        // waiter with a fresh connection instead of pooling the poisoned one.
+        factory.Connections[0].CompleteQuiesce(clean: false);
+
+        var fresh = await pending.WaitAsync(TimeSpan.FromSeconds(2),
+            TestContext.Current.CancellationToken);
+
+        Assert.NotSame(lease1, fresh);
+        Assert.False(lease1.IsAlive());
+        Assert.True(factory.Connections[0].Disposed);
+
+        fresh.Dispose();
+    }
+
+    private sealed class RecordingFakeFactory : ITcpConnectionFactory
+    {
+        public List<FakeDuplexConnection> Connections { get; } = [];
+
+        public Task<ConnectionLease> EstablishAsync(TransportOptions options, CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var fake = new FakeDuplexConnection();
+            Connections.Add(fake);
+            var lease = new ConnectionLease(fake, new CancellationTokenSource(), ConnectionInfo.None);
+            return Task.FromResult(lease);
         }
     }
 

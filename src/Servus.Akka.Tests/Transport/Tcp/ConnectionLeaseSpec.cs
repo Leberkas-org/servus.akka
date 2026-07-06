@@ -7,7 +7,7 @@ public sealed class ConnectionLeaseSpec
 {
     private static ConnectionLease CreateLease()
     {
-        var connection = SocketPipeConnection.Create(Stream.Null);
+        var connection = new StreamConnection(Stream.Null, new TransportConnectionOptions());
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, ConnectionInfo.None);
         return lease;
@@ -22,19 +22,19 @@ public sealed class ConnectionLeaseSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void ConnectionLease_should_expose_input_reader()
+    public void ConnectionLease_should_expose_options()
     {
         var lease = CreateLease();
 
-        Assert.NotNull(lease.OutputWriter);
+        Assert.NotNull(lease.Options);
     }
 
     [Fact(Timeout = 5000)]
-    public void ConnectionLease_should_expose_output_writer()
+    public void ConnectionLease_should_expose_connection_instance()
     {
         var lease = CreateLease();
 
-        Assert.NotNull(lease.OutputWriter);
+        Assert.NotNull(lease.Connection);
     }
 
     [Fact(Timeout = 5000)]

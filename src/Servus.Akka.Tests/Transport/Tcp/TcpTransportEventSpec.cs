@@ -8,7 +8,7 @@ public sealed class TcpTransportEventSpec
     [Fact(Timeout = 5000)]
     public void LeaseAcquired_should_preserve_lease()
     {
-        var connection = SocketPipeConnection.Create(Stream.Null);
+        var connection = new StreamConnection(Stream.Null, new TransportConnectionOptions());
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, ConnectionInfo.None);
 

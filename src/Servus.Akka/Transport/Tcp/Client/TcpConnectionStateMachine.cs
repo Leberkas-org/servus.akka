@@ -1,4 +1,3 @@
-using System.IO.Pipelines;
 using Akka.Actor;
 using static Servus.Senf;
 
@@ -19,9 +18,15 @@ public sealed class TcpConnectionStateMachine(
     private ConnectTransport? _pendingConnect;
     private bool _autoReconnect;
 
-    private readonly Queue<WireBuffer> _pendingWrites = new();
-    private bool _needsFlush;
-    private bool _flushInProgress;
+    // Buffers pushed before a lease is acquired; drained into the connection's send queue on
+    // acquisition. Orphan-disposed on PostStop / reconnect.
+    private readonly Queue<WireBuffer> _preConnectWrites = new();
+
+    // Outbound bytes handed to the connection's send queue that have not yet been reported flushed.
+    // Drives watermark backpressure: upstream is pulled only while this stays below the high mark.
+    private long _bytesInFlight;
+    private long _highWatermark = new TransportConnectionOptions().OutputHighWatermark;
+    private long _lowWatermark = new TransportConnectionOptions().OutputLowWatermark;
 
     private bool _readInProgress;
     private int _syncReadBudget = MaxSyncReads;
@@ -29,8 +34,12 @@ public sealed class TcpConnectionStateMachine(
     private bool _isReconnecting;
     private bool _disconnectedSignaled;
     private CancellationTokenSource? _acquireCts;
+    private ReadEventState _readState = new(0);
 
-    private SocketPipeConnection? Connection => _currentLease?.Connection;
+    private IDuplexConnection? Connection => _currentLease?.Connection;
+
+    /// <summary>TEST-ONLY. The cached read transforms for the current generation.</summary>
+    internal ReadEventState ReadState => _readState;
 
     internal void Dispatch(ITcpTransportEvent evt)
     {
@@ -66,11 +75,10 @@ public sealed class TcpConnectionStateMachine(
                 }
 
                 break;
-            case PipeFlushComplete e:
+            case SendFlushed e:
                 if (e.Gen == _connectionGen)
                 {
-                    _flushInProgress = false;
-                    FlushPendingWrites();
+                    OnSendFlushed(e.Bytes);
                 }
 
                 break;
@@ -99,15 +107,10 @@ public sealed class TcpConnectionStateMachine(
         if (_currentLease is null)
         {
             ops.OnCompleteStage();
+            return;
         }
-        else if (_pendingWrites.Count == 0 && !_flushInProgress)
-        {
-            FlushIfNeeded();
-            _connectionGen++;
-            ReturnLeaseToPool(poolingStrategy.OnUpstreamFinish(_currentLease!));
-            _currentLease = null;
-            ops.OnCompleteStage();
-        }
+
+        TryCompleteAfterUpstreamFinish();
     }
 
     public void HandleDownstreamFinish()
@@ -133,7 +136,7 @@ public sealed class TcpConnectionStateMachine(
         ops.OnCancelTimer(ConnectTimerKey);
         CleanupTransport();
 
-        while (_pendingWrites.TryDequeue(out var orphan))
+        while (_preConnectWrites.TryDequeue(out var orphan))
         {
             orphan.Dispose();
         }
@@ -147,14 +150,8 @@ public sealed class TcpConnectionStateMachine(
             return;
         }
 
-        if (!_flushInProgress)
-        {
-            FlushIfNeeded();
-        }
-
         _readInProgress = true;
 
-        var gen = _connectionGen;
         var readTask = connection.ReceiveAsync();
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
@@ -166,9 +163,7 @@ public sealed class TcpConnectionStateMachine(
         }
 
         _syncReadBudget = MaxSyncReads;
-        readTask.PipeTo(self,
-            success: buffer => new ReadCompleted(buffer, gen),
-            failure: ex => new ReadFailed(ex, gen));
+        readTask.PipeTo(self, success: _readState.ReadSuccess, failure: _readState.ReadFailure);
     }
 
     private void HandleConnectTransport(ConnectTransport connect)
@@ -191,22 +186,28 @@ public sealed class TcpConnectionStateMachine(
 
     private void HandleTransportData(TransportData data)
     {
-        if (_currentLease is null || _flushInProgress)
+        var buffer = data.Buffer;
+        data.Return();
+
+        if (_currentLease is null)
         {
-            _pendingWrites.Enqueue(data.Buffer);
+            _preConnectWrites.Enqueue(buffer);
             ops.OnSignalPullOutbound();
             return;
         }
 
-        if (!WriteToOutputPipe(data.Buffer))
+        if (!Connection!.TryEnqueue(buffer))
         {
+            buffer.Dispose();
             OnInboundComplete(DisconnectReason.Error);
             return;
         }
 
-        FlushIfNeeded();
+        _bytesInFlight += buffer.Length;
 
-        if (!_flushInProgress)
+        // Pull the next outbound item only while we are below the high watermark; otherwise pause and
+        // wait for SendFlushed to drain us back below the low watermark.
+        if (_bytesInFlight < _highWatermark)
         {
             ops.OnSignalPullOutbound();
         }
@@ -232,8 +233,18 @@ public sealed class TcpConnectionStateMachine(
         _connectionGen++;
         _leaseReturned = false;
         _currentLease = lease;
+        _bytesInFlight = 0;
+        _highWatermark = lease.Options.OutputHighWatermark;
+        _lowWatermark = lease.Options.OutputLowWatermark;
 
-        Tracing.For("Connection").Debug(this, "Pipe transport ready");
+        var gen = _connectionGen;
+        _readState = new ReadEventState(gen);
+
+        // Assigned once per lease, before the first enqueue: the send loop reports each fully-sent
+        // batch back to this actor. Allocation-free per batch — the closure captures only self + gen.
+        lease.Connection.OnFlushed = bytes => self.Tell(new SendFlushed(bytes, gen));
+
+        Tracing.For("Connection").Debug(this, "Channel transport ready");
 
         // Signal TransportConnected for every lease that follows a signaled disconnect, not only
         // explicit reconnects: a consumer whose FIRST acquisition failed (or that disconnected via
@@ -247,7 +258,7 @@ public sealed class TcpConnectionStateMachine(
             ops.OnPushInbound(new TransportConnected(_currentLease!.Info));
         }
 
-        FlushPendingWrites();
+        DrainPreConnectWrites();
         RequestRead();
     }
 
@@ -288,6 +299,47 @@ public sealed class TcpConnectionStateMachine(
         OnInboundComplete(DisconnectReason.Error);
     }
 
+    private void OnSendFlushed(int bytes)
+    {
+        var before = _bytesInFlight;
+        _bytesInFlight -= bytes;
+
+        if (_upstreamFinished)
+        {
+            if (_bytesInFlight == 0)
+            {
+                TryCompleteAfterUpstreamFinish();
+            }
+
+            return;
+        }
+
+        // Resume the outbound pull only on the edge where in-flight bytes just crossed below the low
+        // watermark, so a burst of small flushes doesn't fire a pull per batch.
+        if (before >= _lowWatermark && _bytesInFlight < _lowWatermark)
+        {
+            ops.OnSignalPullOutbound();
+        }
+    }
+
+    private void TryCompleteAfterUpstreamFinish()
+    {
+        if (!_upstreamFinished || _currentLease is null)
+        {
+            return;
+        }
+
+        if (_preConnectWrites.Count != 0 || _bytesInFlight != 0)
+        {
+            return;
+        }
+
+        _connectionGen++;
+        ReturnLeaseToPool(poolingStrategy.OnUpstreamFinish(_currentLease!));
+        _currentLease = null;
+        ops.OnCompleteStage();
+    }
+
     private void OnInboundComplete(DisconnectReason reason)
     {
         Tracing.For("Connection").Debug(this, "Disconnected: {0}", reason);
@@ -298,11 +350,12 @@ public sealed class TcpConnectionStateMachine(
             PushDisconnected(DisconnectReason.Transient);
             _isReconnecting = true;
 
-            while (_pendingWrites.TryDequeue(out var orphan))
+            while (_preConnectWrites.TryDequeue(out var orphan))
             {
                 orphan.Dispose();
             }
 
+            _bytesInFlight = 0;
             _leaseReturned = false;
             ReturnLeaseToPool(poolAction);
             _currentLease = null;
@@ -313,6 +366,7 @@ public sealed class TcpConnectionStateMachine(
 
         PushDisconnected(reason);
 
+        _bytesInFlight = 0;
         _leaseReturned = false;
         ReturnLeaseToPool(poolAction);
         _currentLease = null;
@@ -369,6 +423,8 @@ public sealed class TcpConnectionStateMachine(
     {
         _connectionGen++;
         _readInProgress = false;
+        _readState = new ReadEventState(_connectionGen);
+        _bytesInFlight = 0;
 
         _acquireCts?.Cancel();
         _acquireCts?.Dispose();
@@ -381,79 +437,29 @@ public sealed class TcpConnectionStateMachine(
         _currentLease = null;
     }
 
-    private void FlushPendingWrites()
+    private void DrainPreConnectWrites()
     {
-        while (_pendingWrites.TryDequeue(out var buffer))
+        while (_preConnectWrites.TryDequeue(out var buffer))
         {
-            if (_currentLease is not null)
-            {
-                if (!WriteToOutputPipe(buffer))
-                {
-                    OnInboundComplete(DisconnectReason.Error);
-                    return;
-                }
-            }
-            else
+            if (_currentLease is null)
             {
                 buffer.Dispose();
+                continue;
             }
+
+            if (!Connection!.TryEnqueue(buffer))
+            {
+                buffer.Dispose();
+                OnInboundComplete(DisconnectReason.Error);
+                return;
+            }
+
+            _bytesInFlight += buffer.Length;
         }
 
-        FlushIfNeeded();
-
-        if (!_flushInProgress)
+        if (_currentLease is not null && _bytesInFlight < _highWatermark)
         {
             ops.OnSignalPullOutbound();
         }
-    }
-
-    private bool WriteToOutputPipe(WireBuffer data)
-    {
-        try
-        {
-            var writer = _currentLease!.OutputWriter;
-            var mem = writer.GetMemory(data.Length);
-            data.Memory.Span.CopyTo(mem.Span);
-            writer.Advance(data.Length);
-            data.Dispose();
-            _needsFlush = true;
-            return true;
-        }
-        catch (InvalidOperationException)
-        {
-            data.Dispose();
-            return false;
-        }
-    }
-
-    private void FlushIfNeeded()
-    {
-        if (!_needsFlush || _currentLease is null)
-        {
-            return;
-        }
-
-        _needsFlush = false;
-        var gen = _connectionGen;
-
-        ValueTask<FlushResult> flush;
-        try
-        {
-            flush = _currentLease.OutputWriter.FlushAsync();
-        }
-        catch (InvalidOperationException)
-        {
-            return;
-        }
-
-        if (flush.IsCompleted)
-        {
-            return;
-        }
-
-        _flushInProgress = true;
-        flush.PipeTo(self,
-            success: _ => new PipeFlushComplete(gen),
-            failure: _ => new PipeFlushComplete(gen));
     }
 }

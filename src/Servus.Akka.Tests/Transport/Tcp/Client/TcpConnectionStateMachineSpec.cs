@@ -1,4 +1,5 @@
 using Akka.Actor;
+using Servus.Akka.Tests.Transport;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
@@ -28,8 +29,11 @@ public sealed class TcpConnectionStateMachineSpec
     }
 
     private static ConnectionLease CreateTestLease()
+        => CreateTestLease(out _);
+
+    private static ConnectionLease CreateTestLease(out FakeDuplexConnection connection)
     {
-        var connection = SocketPipeConnection.CreateInert();
+        connection = new FakeDuplexConnection();
         var cts = new CancellationTokenSource();
         return new ConnectionLease(connection, cts, ConnectionInfo.None);
     }
@@ -630,12 +634,11 @@ public sealed class TcpConnectionStateMachineSpec
         Assert.Equal(DisconnectReason.Graceful, disconnected.Reason);
     }
 
-    // The inert connection (SocketPipeConnection.CreateInert) is not reentrant-instrumented: its
-    // ReceiveAsync() parks on Task.Delay(Timeout.Infinite) forever, which itself models "a read is
-    // in flight" and never completes synchronously, so there is no fixture-level call counter to
-    // observe a second receive. The bug/fix under test is entirely captured by whether
-    // _readInProgress survives a stale-generation event, so that private flag (inspected via
-    // reflection, no production seam added) is the observable assertion here.
+    // The fake connection's ReceiveAsync() returns a TCS-backed ValueTask that never completes,
+    // which itself models "a read is in flight" and never completes synchronously, so there is no
+    // fixture-level call counter to observe a second receive. The bug/fix under test is entirely
+    // captured by whether _readInProgress survives a stale-generation event, so that private flag
+    // (inspected via reflection, no production seam added) is the observable assertion here.
     [Fact(Timeout = 5000)]
     public void Dispatch_stale_ReadCompleted_should_not_clear_read_in_progress()
     {
@@ -666,6 +669,95 @@ public sealed class TcpConnectionStateMachineSpec
         Assert.True(GetReadInProgress(sm));
         Assert.Empty(ops.PushedInbound);
         Assert.Equal(pullBefore, ops.PullOutboundCount);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandleTransportData_should_enqueue_buffer_and_return_wrapper()
+    {
+        var (sm, _) = CreateStateMachine();
+        var lease = CreateTestLease(out var connection);
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        var wrapper = TransportData.Rent(buffer);
+
+        sm.HandlePush(wrapper);
+
+        Assert.Contains(buffer, connection.Enqueued);
+        Assert.Null(wrapper.Buffer); // the wrapper was returned to the pool after the enqueue
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandlePush_above_high_watermark_should_not_pull_upstream()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease(out var connection);
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        var big = WireBuffer.Rent(512 * 1024);
+        big.Length = 512 * 1024;
+        var pullBefore = ops.PullOutboundCount;
+
+        sm.HandlePush(TransportData.Rent(big));
+
+        Assert.Contains(big, connection.Enqueued);
+        Assert.Equal(pullBefore, ops.PullOutboundCount); // at/above high watermark: no pull
+    }
+
+    [Fact(Timeout = 5000)]
+    public void SendFlushed_below_low_watermark_should_resume_pull()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease(out _);
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        var big = WireBuffer.Rent(512 * 1024);
+        big.Length = 512 * 1024;
+        sm.HandlePush(TransportData.Rent(big)); // 512K in flight, at high watermark, no pull
+        var pullBefore = ops.PullOutboundCount;
+
+        // 512K - 300K = 212K, crossing below the 256K low watermark.
+        sm.Dispatch(new SendFlushed(300 * 1024, Gen: 1));
+
+        Assert.True(ops.PullOutboundCount > pullBefore);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void UpstreamFinish_with_bytes_in_flight_should_complete_after_final_SendFlushed()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease(out _);
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        var buffer = CreateTestBuffer(1, 2, 3);
+        sm.HandlePush(TransportData.Rent(buffer)); // 3 bytes in flight
+
+        sm.HandleUpstreamFinish();
+        Assert.Equal(0, ops.CompleteStageCount); // deferred: bytes still in flight
+
+        sm.Dispatch(new SendFlushed(3, Gen: 1));
+        Assert.Equal(1, ops.CompleteStageCount); // final flush drains the last byte → complete
+    }
+
+    [Fact(Timeout = 5000)]
+    public void RequestRead_async_path_should_reuse_cached_transforms()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease(out _);
+        sm.Dispatch(new LeaseAcquired(lease)); // gen 1, RequestRead issues async read #1
+
+        var success1 = sm.ReadState.ReadSuccess;
+        var failure1 = sm.ReadState.ReadFailure;
+
+        // Complete read #1 in the current gen so a second read can be issued.
+        var buffer = CreateTestBuffer(1);
+        sm.Dispatch(new ReadCompleted(buffer, Gen: 1));
+        ((TransportData)ops.PushedInbound[^1]).Buffer.Dispose();
+
+        sm.RequestRead(); // async read #2, same generation
+
+        Assert.Same(success1, sm.ReadState.ReadSuccess);
+        Assert.Same(failure1, sm.ReadState.ReadFailure);
     }
 
     private static bool GetReadInProgress(TcpConnectionStateMachine sm)

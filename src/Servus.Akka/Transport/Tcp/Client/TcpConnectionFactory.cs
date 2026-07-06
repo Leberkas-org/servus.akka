@@ -47,12 +47,18 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
             protocol,
             security);
 
-        var pipeOptions = SocketPipeConnectionOptions.FromTransport(options);
-        var connection = plaintextSocket is not null
-            ? SocketPipeConnection.Create(plaintextSocket, pipeOptions)
-            : SocketPipeConnection.Create(stream, pipeOptions);
+        var connectionOptions = new TransportConnectionOptions
+        {
+            ReceiveBufferHint = options.ReceiveBufferHint,
+            OutputHighWatermark = options.OutputPauseThreshold,
+            OutputLowWatermark = options.OutputResumeThreshold,
+        };
+
+        IDuplexConnection connection = plaintextSocket is not null
+            ? new RawSocketConnection(plaintextSocket, connectionOptions)
+            : new StreamConnection(stream, connectionOptions);
         var cts = new CancellationTokenSource();
-        var lease = new ConnectionLease(connection, cts, info);
+        var lease = new ConnectionLease(connection, cts, info, options: connectionOptions);
 
         return lease;
     }

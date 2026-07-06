@@ -1,5 +1,3 @@
-using System.IO.Pipelines;
-
 namespace Servus.Akka.Transport.Tcp;
 
 internal sealed class ConnectionLease : IDisposable
@@ -10,22 +8,27 @@ internal sealed class ConnectionLease : IDisposable
     private bool _alive = true;
 
     internal ConnectionLease(
-        SocketPipeConnection connection,
+        IDuplexConnection connection,
         CancellationTokenSource cts,
         ConnectionInfo info,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        TransportConnectionOptions? options = null)
     {
         Connection = connection;
         _cts = cts;
         Info = info;
+        Options = options ?? new TransportConnectionOptions();
         _clock = timeProvider ?? TimeProvider.System;
         _createdTicks = _clock.GetUtcNow().ToUnixTimeMilliseconds();
     }
 
-    public SocketPipeConnection Connection { get; }
+    public IDuplexConnection Connection { get; }
     public ConnectionInfo Info { get; }
 
-    public PipeWriter OutputWriter => Connection.OutputWriter;
+    /// <summary>Watermarks / receive hint the transport was constructed with; consumed by the client
+    /// state machine for outbound backpressure. Carried on the lease to keep the connection interface
+    /// minimal.</summary>
+    public TransportConnectionOptions Options { get; }
 
     public bool IsAlive() => _alive;
 
