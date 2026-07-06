@@ -29,6 +29,7 @@ public sealed class TcpConnectionStateMachine(
     private int _syncReadBudget = MaxSyncReads;
     private bool _upstreamFinished;
     private bool _isReconnecting;
+    private bool _disconnectedSignaled;
     private CancellationTokenSource? _acquireCts;
 
     private SocketPipeConnection? Connection => _currentLease?.Connection;
@@ -80,8 +81,8 @@ public sealed class TcpConnectionStateMachine(
             case TransportData data:
                 HandleTransportData(data);
                 break;
-            case DisconnectTransport:
-                HandleDisconnectTransport();
+            case DisconnectTransport disconnect:
+                HandleDisconnectTransport(disconnect);
                 break;
         }
     }
@@ -117,7 +118,7 @@ public sealed class TcpConnectionStateMachine(
 
         _pendingConnect = null;
 
-        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Timeout));
+        PushDisconnected(DisconnectReason.Timeout);
         ops.OnSignalPullOutbound();
     }
 
@@ -211,9 +212,15 @@ public sealed class TcpConnectionStateMachine(
         }
     }
 
-    private void HandleDisconnectTransport()
+    private void HandleDisconnectTransport(DisconnectTransport disconnect)
     {
         CleanupTransport();
+
+        // Contract: every DisconnectTransport is answered with a TransportDisconnected, even when
+        // no lease was held. Without the echo a consumer that disconnects on a protocol error and
+        // then reconnects never learns the transport went down: OnLeaseAcquired only signals
+        // TransportConnected after a signaled disconnect, so its buffered replay hangs forever.
+        PushDisconnected(disconnect.Reason);
         ops.OnSignalPullOutbound();
     }
 
@@ -228,9 +235,15 @@ public sealed class TcpConnectionStateMachine(
 
         Tracing.For("Connection").Debug(this, "Pipe transport ready");
 
-        if (_isReconnecting)
+        // Signal TransportConnected for every lease that follows a signaled disconnect, not only
+        // explicit reconnects: a consumer whose FIRST acquisition failed (or that disconnected via
+        // DisconnectTransport before ever holding a lease) is also waiting in its reconnecting
+        // state and would otherwise never replay its buffered requests. The very first clean
+        // connect stays silent — consumers treat TransportConnected as "connection restored".
+        if (_isReconnecting || _disconnectedSignaled)
         {
             _isReconnecting = false;
+            _disconnectedSignaled = false;
             ops.OnPushInbound(new TransportConnected(_currentLease!.Info));
         }
 
@@ -254,7 +267,7 @@ public sealed class TcpConnectionStateMachine(
         }
 
         _pendingConnect = null;
-        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
+        PushDisconnected(DisconnectReason.Error);
         ops.OnSignalPullOutbound();
     }
 
@@ -289,7 +302,7 @@ public sealed class TcpConnectionStateMachine(
 
         if (_autoReconnect && _pendingConnect is null && !_upstreamFinished)
         {
-            ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Transient));
+            PushDisconnected(DisconnectReason.Transient);
             _isReconnecting = true;
 
             while (_pendingWrites.TryDequeue(out var orphan))
@@ -305,7 +318,7 @@ public sealed class TcpConnectionStateMachine(
             return;
         }
 
-        ops.OnPushInbound(new TransportDisconnected(reason));
+        PushDisconnected(reason);
 
         _leaseReturned = false;
         ReturnLeaseToPool(poolAction);
@@ -339,6 +352,12 @@ public sealed class TcpConnectionStateMachine(
         }
 
         ops.OnScheduleTimer(ConnectTimerKey, timeout);
+    }
+
+    private void PushDisconnected(DisconnectReason reason)
+    {
+        _disconnectedSignaled = true;
+        ops.OnPushInbound(new TransportDisconnected(reason));
     }
 
     private void ReturnLeaseToPool(PoolAction action)

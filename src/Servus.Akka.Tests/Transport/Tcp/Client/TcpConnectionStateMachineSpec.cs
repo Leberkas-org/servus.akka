@@ -253,6 +253,64 @@ public sealed class TcpConnectionStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void HandlePush_DisconnectTransport_should_echo_disconnected()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease();
+        sm.Dispatch(new LeaseAcquired(lease));
+        ops.PushedInbound.Clear();
+
+        sm.HandlePush(new DisconnectTransport(DisconnectReason.Error));
+
+        Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Error });
+    }
+
+    [Fact(Timeout = 5000)]
+    public void HandlePush_DisconnectTransport_without_connection_should_echo_disconnected()
+    {
+        var (sm, ops) = CreateStateMachine();
+        ops.PushedInbound.Clear();
+
+        sm.HandlePush(new DisconnectTransport(DisconnectReason.Graceful));
+
+        Assert.Contains(ops.PushedInbound, item => item is TransportDisconnected { Reason: DisconnectReason.Graceful });
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_LeaseAcquired_after_disconnect_transport_should_signal_connected()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease1 = CreateTestLease();
+        sm.Dispatch(new LeaseAcquired(lease1));
+
+        sm.HandlePush(new DisconnectTransport(DisconnectReason.Error));
+        sm.HandlePush(new ConnectTransport(TestOptions));
+        ops.PushedInbound.Clear();
+
+        var lease2 = CreateTestLease();
+        sm.Dispatch(new LeaseAcquired(lease2));
+
+        Assert.Contains(ops.PushedInbound, item => item is TransportConnected);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_LeaseAcquired_after_failed_first_acquisition_should_signal_connected()
+    {
+        var (sm, ops) = CreateStateMachine();
+
+        sm.HandlePush(new ConnectTransport(TestOptions));
+        sm.Dispatch(new AcquisitionFailed(new IOException("connection refused")));
+
+        sm.HandlePush(new ConnectTransport(TestOptions));
+        ops.PushedInbound.Clear();
+
+        var lease = CreateTestLease();
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        Assert.Contains(ops.PushedInbound, item => item is TransportConnected);
+    }
+
+    [Fact(Timeout = 5000)]
     public void Dispatch_AcquisitionFailed_should_push_disconnected_and_pull()
     {
         var (sm, ops) = CreateStateMachine();
