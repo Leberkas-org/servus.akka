@@ -1,4 +1,5 @@
 using System.Buffers;
+using static Servus.Senf;
 
 namespace Servus.Akka.Transport;
 
@@ -77,7 +78,19 @@ public sealed class TransportBuffer : IDisposable
     public void Dispose()
     {
         var owner = Interlocked.Exchange(ref _owner, null);
-        owner?.Dispose();
+        if (owner is null)
+        {
+            // Double-dispose: the first Dispose already returned this wrapper to the pool. Returning
+            // it AGAIN would hand the same instance to two renters, aliasing their buffers (one
+            // renter disposes the other's owner underneath it → ObjectDisposedException or silent
+            // cross-connection data corruption). Log the culprit and bail.
+            Tracing.For("Transport").Warning(this,
+                "TransportBuffer double-dispose detected — wrapper NOT re-returned to pool. Stack: {0}",
+                Environment.StackTrace);
+            return;
+        }
+
+        owner.Dispose();
         _offset = 0;
 
         if (MaxPoolSize > 0)

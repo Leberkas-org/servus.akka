@@ -1,3 +1,5 @@
+using static Servus.Senf;
+
 namespace Servus.Akka.Transport;
 
 public interface ITransportOutbound;
@@ -33,6 +35,16 @@ public sealed class TransportData : ITransportOutbound, ITransportInbound
 
     public void Return()
     {
+        if (Buffer is null)
+        {
+            // Double-return: this wrapper is already back in the pool; returning it again would
+            // hand the same instance to two renters (buffer aliasing / cross-connection corruption).
+            Tracing.For("Transport").Warning(this,
+                "TransportData double-return detected — wrapper NOT re-returned to pool. Stack: {0}",
+                Environment.StackTrace);
+            return;
+        }
+
         Buffer = null!;
         Pool.Return(this);
     }
@@ -59,6 +71,14 @@ public sealed class MultiplexedData : ITransportOutbound, ITransportInbound
 
     public void Return()
     {
+        if (Buffer is null)
+        {
+            Tracing.For("Transport").Warning(this,
+                "MultiplexedData double-return detected — wrapper NOT re-returned to pool. Stack: {0}",
+                Environment.StackTrace);
+            return;
+        }
+
         Buffer = null!;
         StreamId = default;
         Pool.Return(this);
