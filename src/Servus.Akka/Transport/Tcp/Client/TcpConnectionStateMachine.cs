@@ -19,7 +19,7 @@ public sealed class TcpConnectionStateMachine(
     private ConnectTransport? _pendingConnect;
     private bool _autoReconnect;
 
-    private readonly Queue<TransportBuffer> _pendingWrites = new();
+    private readonly Queue<WireBuffer> _pendingWrites = new();
     private bool _needsFlush;
     private bool _flushInProgress;
 
@@ -271,7 +271,7 @@ public sealed class TcpConnectionStateMachine(
         ops.OnSignalPullOutbound();
     }
 
-    private void OnReadCompleted(TransportBuffer? buffer)
+    private void OnReadCompleted(WireBuffer? buffer)
     {
         if (buffer is null)
         {
@@ -407,7 +407,7 @@ public sealed class TcpConnectionStateMachine(
         }
     }
 
-    private bool WriteToOutputPipe(TransportBuffer data)
+    private bool WriteToOutputPipe(WireBuffer data)
     {
         try
         {

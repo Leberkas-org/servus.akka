@@ -45,7 +45,7 @@ public sealed class QuicTransportStateMachineSpec
 
     private static DirectStreamReadComplete CreateReadEvent(QuicStreamState state, byte[] data)
     {
-        var buf = TransportBuffer.Rent(data.Length);
+        var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
         state.BeginDirectRead(buf);
@@ -106,7 +106,7 @@ public sealed class QuicTransportStateMachineSpec
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        var buffer = TransportBuffer.Rent(16);
+        var buffer = WireBuffer.Rent(16);
         buffer.Length = 4;
         sm.HandlePush(MultiplexedData.Rent(buffer, 1));
 
@@ -188,7 +188,7 @@ public sealed class QuicTransportStateMachineSpec
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        var buffer = TransportBuffer.Rent(16);
+        var buffer = WireBuffer.Rent(16);
         buffer.Length = 4;
 
         sm.HandlePush(MultiplexedData.Rent(buffer, 999));
@@ -203,7 +203,7 @@ public sealed class QuicTransportStateMachineSpec
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        var buffer = TransportBuffer.Rent(16);
+        var buffer = WireBuffer.Rent(16);
         buffer.Length = 4;
         var data = MultiplexedData.Rent(buffer, 999);
 
@@ -220,7 +220,7 @@ public sealed class QuicTransportStateMachineSpec
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
         sm.RegisterTestStream(1, StreamDirection.Bidirectional);
 
-        var buffer = TransportBuffer.Rent(16);
+        var buffer = WireBuffer.Rent(16);
         buffer.Length = 4;
         var data = MultiplexedData.Rent(buffer, 1);
 

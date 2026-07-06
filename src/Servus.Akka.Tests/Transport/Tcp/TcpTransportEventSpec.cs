@@ -29,7 +29,7 @@ public sealed class TcpTransportEventSpec
     [Fact(Timeout = 5000)]
     public void ReadCompleted_should_preserve_fields()
     {
-        var buffer = TransportBuffer.Rent(3);
+        var buffer = WireBuffer.Rent(3);
         buffer.Length = 3;
         var evt = new ReadCompleted(buffer, 5);
 

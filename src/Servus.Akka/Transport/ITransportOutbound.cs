@@ -20,9 +20,9 @@ public sealed class TransportData : ITransportOutbound, ITransportInbound
 {
     private static readonly ObjectPool<TransportData> Pool = new(256);
 
-    public TransportBuffer Buffer { get; private set; } = null!;
+    public WireBuffer Buffer { get; private set; } = null!;
 
-    public static TransportData Rent(TransportBuffer buffer)
+    public static TransportData Rent(WireBuffer buffer)
     {
         if (!Pool.TryRent(out var item))
         {
@@ -54,10 +54,10 @@ public sealed class MultiplexedData : ITransportOutbound, ITransportInbound
 {
     private static readonly ObjectPool<MultiplexedData> Pool = new(256);
 
-    public TransportBuffer Buffer { get; private set; } = null!;
+    public WireBuffer Buffer { get; private set; } = null!;
     public StreamTarget StreamId { get; private set; }
 
-    public static MultiplexedData Rent(TransportBuffer buffer, StreamTarget streamId)
+    public static MultiplexedData Rent(WireBuffer buffer, StreamTarget streamId)
     {
         if (!Pool.TryRent(out var item))
         {

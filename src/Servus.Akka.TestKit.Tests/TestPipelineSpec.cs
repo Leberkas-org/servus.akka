@@ -35,14 +35,14 @@ public sealed class TestPipelineSpec : global::Akka.TestKit.Xunit.TestKit
         var stage = new TestConnectionStageBuilder()
             .AutoConnect()
             .OnOutbound<TransportData>((_, ctx) =>
-                ctx.Push(TransportData.Rent(new byte[] { 0x01 })))
+                ctx.Push(TransportData.Rent(new byte[] { 0x01 }.ToWireBuffer())))
             .Build();
 
         var inputs = new ITransportOutbound[]
         {
             new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-            TransportData.Rent(new byte[] { 1 }),
-            TransportData.Rent(new byte[] { 2 })
+            TransportData.Rent(new byte[] { 1 }.ToWireBuffer()),
+            TransportData.Rent(new byte[] { 2 }.ToWireBuffer())
         };
 
         var results = await TestPipeline.RunManyAsync(

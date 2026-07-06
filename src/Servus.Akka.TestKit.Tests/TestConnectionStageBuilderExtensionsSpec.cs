@@ -27,13 +27,13 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
             .OnData((_, ctx) =>
             {
                 handlerInvoked = true;
-                ctx.Push(TransportData.Rent(new byte[] { 0xFF }));
+                ctx.Push(TransportData.Rent(new byte[] { 0xFF }.ToWireBuffer()));
             })
             .Build();
 
         _ = Source.From<ITransportOutbound>([
                 new ConnectTransport(new TcpTransportOptions { Host = "localhost", Port = 80 }),
-                TransportData.Rent(new byte[] { 0xAA })
+                TransportData.Rent(new byte[] { 0xAA }.ToWireBuffer())
             ])
             .Via(stage.AsFlow())
             .RunWith(Sink.ForEach<ITransportInbound>(msg =>
@@ -98,7 +98,7 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
         var ct = TestContext.Current.CancellationToken;
         var handlerInvoked = new TaskCompletionSource();
 
-        var buf = TransportBuffer.Rent(2);
+        var buf = WireBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0xAA;
         buf.FullMemory.Span[1] = 0xBB;
         buf.Length = 2;
@@ -248,7 +248,7 @@ public sealed class TestConnectionStageBuilderExtensionsSpec : global::Akka.Test
             .Build();
 
         var originalData = new byte[] { 0x11, 0x22, 0x33 };
-        var originalBuf = TransportBuffer.Rent(originalData.Length);
+        var originalBuf = WireBuffer.Rent(originalData.Length);
         originalData.CopyTo(originalBuf.FullMemory.Span);
         originalBuf.Length = originalData.Length;
 

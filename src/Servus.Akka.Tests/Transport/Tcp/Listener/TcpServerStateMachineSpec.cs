@@ -21,9 +21,9 @@ public sealed class TcpServerStateMachineSpec
         return (sm, ops);
     }
 
-    private static TransportBuffer CreateTestBuffer(params byte[] data)
+    private static WireBuffer CreateTestBuffer(params byte[] data)
     {
-        var buf = TransportBuffer.Rent(data.Length);
+        var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
         return buf;

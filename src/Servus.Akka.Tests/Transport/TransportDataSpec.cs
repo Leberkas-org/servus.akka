@@ -4,9 +4,9 @@ namespace Servus.Akka.Tests.Transport;
 
 public sealed class TransportDataSpec
 {
-    private static TransportBuffer CreateBuffer(params byte[] data)
+    private static WireBuffer CreateBuffer(params byte[] data)
     {
-        var buf = TransportBuffer.Rent(data.Length == 0 ? 1 : data.Length);
+        var buf = WireBuffer.Rent(data.Length == 0 ? 1 : data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
         return buf;

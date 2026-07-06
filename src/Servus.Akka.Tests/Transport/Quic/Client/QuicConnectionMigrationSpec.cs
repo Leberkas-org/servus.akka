@@ -124,7 +124,7 @@ public sealed class QuicConnectionMigrationSpec
 
         ops.PushedInbound.Clear();
 
-        var buf = TransportBuffer.Rent(4);
+        var buf = WireBuffer.Rent(4);
         new byte[] { 1, 2, 3, 4 }.CopyTo(buf.FullMemory.Span);
         buf.Length = 4;
         state.BeginDirectRead(buf);

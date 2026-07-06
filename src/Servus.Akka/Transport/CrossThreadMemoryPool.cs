@@ -3,7 +3,7 @@ using System.Buffers;
 namespace Servus.Akka.Transport;
 
 /// <summary>
-/// A <see cref="MemoryPool{T}"/> facade over the cross-thread <see cref="PooledArrayMemoryOwner.SharedPool"/>,
+/// A <see cref="MemoryPool{T}"/> facade over the cross-thread <see cref="WireBuffer.SharedPool"/>,
 /// for APIs that take a MemoryPool (System.IO.Pipelines). The default <see cref="MemoryPool{T}.Shared"/>
 /// is the per-core ArrayPool, whose stacks exhaust under high-throughput transport buffering (the input
 /// pipe segments for hundreds of concurrent multiplexed downloads, and the output pipe segments for
@@ -21,7 +21,16 @@ public sealed class CrossThreadMemoryPool : MemoryPool<byte>
     public override int MaxBufferSize => 1024 * 1024;
 
     public override IMemoryOwner<byte> Rent(int minBufferSize = -1)
-        => PooledArrayMemoryOwner.Create(minBufferSize <= 0 ? 4096 : minBufferSize);
+    {
+        var buf = WireBuffer.Rent(minBufferSize <= 0 ? 4 * 1024 : minBufferSize);
+
+        // WireBuffer.Memory is sliced to Length (0 on a fresh Rent), unlike the old
+        // PooledArrayMemoryOwner.Memory which always exposed the whole rented array. Pipe
+        // consumers (System.IO.Pipelines) write into and track usage of the full buffer
+        // themselves via Advance(), so Memory here must expose the entire capacity.
+        buf.Length = buf.Capacity;
+        return buf;
+    }
 
     protected override void Dispose(bool disposing)
     {

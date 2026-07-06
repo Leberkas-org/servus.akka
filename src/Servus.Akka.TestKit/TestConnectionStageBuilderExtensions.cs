@@ -37,7 +37,7 @@ public static class TestConnectionStageBuilderExtensions
     {
         return builder.OnOutbound<MultiplexedData>((data, ctx) =>
         {
-            var echo = TransportBuffer.Rent(data.Buffer.Length);
+            var echo = WireBuffer.Rent(data.Buffer.Length);
             data.Buffer.Span.CopyTo(echo.FullMemory.Span);
             echo.Length = data.Buffer.Length;
             ctx.Push(MultiplexedData.Rent(echo, data.StreamId));

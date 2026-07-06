@@ -232,12 +232,12 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     }
 
     /// <summary>
-    /// Receives once, directly into a rented <see cref="TransportBuffer"/> owned by the caller.
+    /// Receives once, directly into a rented <see cref="WireBuffer"/> owned by the caller.
     /// Returns null on EOF. Not reentrant: at most one outstanding call per connection — the
     /// state machines' pull discipline guarantees this. On failure the rent is disposed here
     /// and the exception propagates.
     /// </summary>
-    public async ValueTask<TransportBuffer?> ReceiveAsync()
+    public async ValueTask<WireBuffer?> ReceiveAsync()
     {
         if (Interlocked.Exchange(ref _receiveActive, 1) == 1)
         {
@@ -261,7 +261,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                 await _receiver!.WaitForDataAsync(_socket);
             }
 
-            var buffer = TransportBuffer.Rent(_receiveHint);
+            var buffer = WireBuffer.Rent(_receiveHint);
             try
             {
                 var bytesRead = _socket is not null
@@ -365,8 +365,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     // cross-thread pool, NOT ArrayPool<byte>.Shared: the per-core Shared pool thrashes
                     // and allocates fresh arrays under the transport's concurrent send load.
                     var length = (int)buffer.Length;
-                    using var owner = PooledArrayMemoryOwner.Create(length);
-                    var mem = owner.Memory[..length];
+                    using var owner = WireBuffer.Rent(length);
+                    var mem = owner.FullMemory[..length];
                     buffer.CopyTo(mem.Span);
                     await stream.WriteAsync(mem, ct);
                 }
@@ -426,8 +426,8 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
                     // the per-core Shared pool misses constantly and allocates fresh byte[] (the bulk of
                     // the H3 upload allocation). The bounded shared pool absorbs the churn.
                     var length = (int)buffer.Length;
-                    using var owner = PooledArrayMemoryOwner.Create(length);
-                    var mem = owner.Memory[..length];
+                    using var owner = WireBuffer.Rent(length);
+                    var mem = owner.FullMemory[..length];
                     buffer.CopyTo(mem.Span);
                     await stream.WriteAsync(mem, ct);
                 }

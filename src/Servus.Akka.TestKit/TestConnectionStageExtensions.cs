@@ -6,10 +6,18 @@ namespace Servus.Akka.TestKit;
 public static class TestConnectionStageExtensions
 {
     public static void PushData(this TestConnectionStage stage, byte[] data)
-        => stage.PushInbound(TransportData.Rent(data));
+        => stage.PushInbound(TransportData.Rent(RentWireBuffer(data)));
 
     public static void PushData(this TestConnectionStage stage, string text)
-        => stage.PushInbound(TransportData.Rent(UTF8.GetBytes(text)));
+        => stage.PushInbound(TransportData.Rent(RentWireBuffer(UTF8.GetBytes(text))));
+
+    private static WireBuffer RentWireBuffer(byte[] data)
+    {
+        var buf = WireBuffer.Rent(data.Length);
+        data.CopyTo(buf.FullMemory.Span);
+        buf.Length = data.Length;
+        return buf;
+    }
 
     public static void PushDisconnected(this TestConnectionStage stage,
         DisconnectReason reason = DisconnectReason.Graceful)
@@ -45,9 +53,7 @@ public static class TestConnectionStageExtensions
 
     public static void PushMultiplexedData(this TestConnectionStage stage, long streamId, byte[] data)
     {
-        var buf = TransportBuffer.Rent(data.Length);
-        data.CopyTo(buf.FullMemory.Span);
-        buf.Length = data.Length;
+        var buf = RentWireBuffer(data);
         stage.PushInbound(MultiplexedData.Rent(buf, streamId));
     }
 
@@ -62,9 +68,7 @@ public static class TestConnectionStageExtensions
 
         foreach (var frame in frames)
         {
-            var buf = TransportBuffer.Rent(frame.Length);
-            frame.CopyTo(buf.FullMemory.Span);
-            buf.Length = frame.Length;
+            var buf = RentWireBuffer(frame);
             stage.PushInbound(MultiplexedData.Rent(buf, streamId));
         }
 

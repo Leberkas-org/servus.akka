@@ -20,7 +20,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
 
     private SocketPipeConnection? _connection;
     private Stream? _stream;
-    private Queue<TransportBuffer>? _openingBuffer;
+    private Queue<WireBuffer>? _openingBuffer;
     private Task? _drainTask;
     private PipeReader? _cachedReader;
     private long _streamId;
@@ -67,9 +67,9 @@ internal sealed class QuicStreamState : IAsyncDisposable
     // CompleteRead (completion arrival) and DisposeAndReturnAsync (teardown) — all of which run on
     // the owning connection actor. The buffer an in-flight QuicStream.ReadAsync writes into must
     // survive until its completion EVENT is processed; disposing it at teardown while the read was
-    // still writing was the double-dispose that poisoned the shared TransportBuffer pool and
+    // still writing was the double-dispose that poisoned the shared WireBuffer pool and
     // corrupted unrelated connections (repro: GaudiHTTP LargeDownloadRegressionSpec under H3 load).
-    internal TransportBuffer? PendingReadBuffer { get; set; }
+    internal WireBuffer? PendingReadBuffer { get; set; }
     internal bool ReadInFlight { get; private set; }
     internal SequencePosition? PendingAdvance { get; set; }
     private bool _tornDownWithReadInFlight;
@@ -80,7 +80,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// must not dispose the buffer (the read may still be writing into its memory) and this instance
     /// must not be returned to the pool.
     /// </summary>
-    internal void BeginDirectRead(TransportBuffer buffer)
+    internal void BeginDirectRead(WireBuffer buffer)
     {
         PendingReadBuffer = buffer;
         ReadInFlight = true;
@@ -94,7 +94,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// was torn down while the read was in flight — the pending buffer has then been released here
     /// and the caller must drop the event; the instance itself is GC-reclaimed (never repooled).
     /// </summary>
-    internal bool CompleteRead(out TransportBuffer? pendingBuffer)
+    internal bool CompleteRead(out WireBuffer? pendingBuffer)
     {
         ReadInFlight = false;
         pendingBuffer = PendingReadBuffer;
@@ -249,11 +249,11 @@ internal sealed class QuicStreamState : IAsyncDisposable
         }
     }
 
-    public bool Write(TransportBuffer buffer)
+    public bool Write(WireBuffer buffer)
     {
         if (_connection is null)
         {
-            (_openingBuffer ??= new Queue<TransportBuffer>()).Enqueue(buffer);
+            (_openingBuffer ??= new Queue<WireBuffer>()).Enqueue(buffer);
             return false;
         }
 
@@ -304,7 +304,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
         return _connection?.CompleteAndDrainOutputAsync() ?? Task.CompletedTask;
     }
 
-    private void WriteToOutputPipe(TransportBuffer data)
+    private void WriteToOutputPipe(WireBuffer data)
     {
         var writer = _connection!.OutputWriter;
         var mem = writer.GetMemory(data.Length);

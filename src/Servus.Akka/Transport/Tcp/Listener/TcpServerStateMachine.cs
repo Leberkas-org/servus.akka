@@ -166,7 +166,7 @@ internal sealed class TcpServerStateMachine(
         }
     }
 
-    private void OnReadCompleted(TransportBuffer? buffer)
+    private void OnReadCompleted(WireBuffer? buffer)
     {
         if (buffer is null)
         {

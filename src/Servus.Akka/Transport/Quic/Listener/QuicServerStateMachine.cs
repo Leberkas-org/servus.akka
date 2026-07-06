@@ -226,7 +226,7 @@ internal sealed class QuicServerStateMachine(
                 return;
             }
 
-            var buf = TransportBuffer.Rent(state.ReadHint);
+            var buf = WireBuffer.Rent(state.ReadHint);
             state.BeginDirectRead(buf);
             qs.ReadAsync(buf.FullMemory, CancellationToken.None).PipeTo(self,
                 success: state.DirectReadTransform,
@@ -290,7 +290,7 @@ internal sealed class QuicServerStateMachine(
         if (result.Buffer.Length > 0)
         {
             var length = (int)result.Buffer.Length;
-            var buf = TransportBuffer.Rent(length);
+            var buf = WireBuffer.Rent(length);
             result.Buffer.CopyTo(buf.FullMemory.Span);
             buf.Length = length;
             ops.OnPushInbound(MultiplexedData.Rent(buf, streamId));

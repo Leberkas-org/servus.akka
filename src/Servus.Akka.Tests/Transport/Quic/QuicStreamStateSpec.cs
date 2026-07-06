@@ -18,7 +18,7 @@ public sealed class QuicStreamStateSpec
     public void Write_in_Opening_should_buffer()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
-        var buf = TransportBuffer.Rent(2);
+        var buf = WireBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0x01;
         buf.FullMemory.Span[1] = 0x02;
         buf.Length = 2;
@@ -54,7 +54,7 @@ public sealed class QuicStreamStateSpec
     public async Task AttachConnection_should_flush_pending_writes_to_output_pipe()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
-        var buf = TransportBuffer.Rent(2);
+        var buf = WireBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0x01;
         buf.FullMemory.Span[1] = 0x02;
         buf.Length = 2;
@@ -158,7 +158,7 @@ public sealed class QuicStreamStateSpec
     public async Task DisposeAsync_should_dispose_pending_writes_and_connection()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
-        var buf = TransportBuffer.Rent(2);
+        var buf = WireBuffer.Rent(2);
         buf.Length = 2;
         state.Write(buf);
 
@@ -188,7 +188,7 @@ public sealed class QuicStreamStateSpec
 
         for (byte i = 1; i <= 3; i++)
         {
-            var buf = TransportBuffer.Rent(1);
+            var buf = WireBuffer.Rent(1);
             buf.FullMemory.Span[0] = i;
             buf.Length = 1;
             state.Write(buf);
@@ -214,7 +214,7 @@ public sealed class QuicStreamStateSpec
         var stream = new MemoryStream();
         state.AttachConnection(stream);
 
-        var buf = TransportBuffer.Rent(2);
+        var buf = WireBuffer.Rent(2);
         buf.FullMemory.Span[0] = 0xAA;
         buf.FullMemory.Span[1] = 0xBB;
         buf.Length = 2;
@@ -245,12 +245,12 @@ public sealed class QuicStreamStateSpec
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
 
-        var buf1 = TransportBuffer.Rent(1);
+        var buf1 = WireBuffer.Rent(1);
         buf1.FullMemory.Span[0] = 0x11;
         buf1.Length = 1;
         state.Write(buf1);
 
-        var buf2 = TransportBuffer.Rent(1);
+        var buf2 = WireBuffer.Rent(1);
         buf2.FullMemory.Span[0] = 0x22;
         buf2.Length = 1;
         state.Write(buf2);
@@ -302,7 +302,7 @@ public sealed class QuicStreamStateSpec
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         Assert.Equal(0, state.PendingWriteCount);
-        state.Write(new byte[] { 1, 2, 3 });
+        state.Write(new byte[] { 1, 2, 3 }.ToWireBuffer());
         Assert.Equal(1, state.PendingWriteCount);
     }
 
@@ -324,7 +324,7 @@ public sealed class QuicStreamStateSpec
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.AttachConnection(new MemoryStream());
 
-        var buf = TransportBuffer.Rent(64);
+        var buf = WireBuffer.Rent(64);
         buf.Length = 10;
         state.PendingReadBuffer = buf;
 
@@ -342,7 +342,7 @@ public sealed class QuicStreamStateSpec
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(7);
 
-        var buf = TransportBuffer.Rent(64);
+        var buf = WireBuffer.Rent(64);
         buf.Length = 16;
         state.BeginDirectRead(buf);
 
@@ -365,7 +365,7 @@ public sealed class QuicStreamStateSpec
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(42);
 
-        var buf = TransportBuffer.Rent(64);
+        var buf = WireBuffer.Rent(64);
         state.BeginDirectRead(buf);
 
         var result = state.DirectReadTransform(16);
@@ -386,7 +386,7 @@ public sealed class QuicStreamStateSpec
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(11);
 
-        var buf = TransportBuffer.Rent(64);
+        var buf = WireBuffer.Rent(64);
         state.BeginDirectRead(buf);
 
         // Teardown races an in-flight QuicStream.ReadAsync that is still writing into buf's memory:
