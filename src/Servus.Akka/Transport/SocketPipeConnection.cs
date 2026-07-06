@@ -19,6 +19,7 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     private readonly bool _waitForData;
     private int _receiveHint;
     private int _shrinkStreak;
+    private int _receiveActive;
 
     public PipeReader InputReader =>
         _directInputReader
@@ -238,41 +239,54 @@ internal sealed class SocketPipeConnection : IAsyncDisposable
     /// </summary>
     public async ValueTask<TransportBuffer?> ReceiveAsync()
     {
-        if (_socket is null && _receiveStream is null)
+        if (Interlocked.Exchange(ref _receiveActive, 1) == 1)
         {
-            // Inert connection (tests): park until disposed, mirroring a pipe read that never
-            // completes. Cancellation surfaces as a teardown-classified exception.
-            await Task.Delay(Timeout.Infinite, _cts.Token);
-            return null;
+            throw new InvalidOperationException(
+                "Concurrent ReceiveAsync — the connection supports one outstanding receive.");
         }
 
-        if (_socket is not null && _waitForData)
-        {
-            // Zero-byte receive before renting so idle connections don't pin a rented buffer.
-            await _receiver!.WaitForDataAsync(_socket);
-        }
-
-        var buffer = TransportBuffer.Rent(_receiveHint);
         try
         {
-            var bytesRead = _socket is not null
-                ? await _receiver!.ReceiveAsync(_socket, buffer.FullMemory)
-                : await _receiveStream!.ReadAsync(buffer.FullMemory, _cts.Token);
-
-            if (bytesRead == 0)
+            if (_socket is null && _receiveStream is null)
             {
-                buffer.Dispose();
+                // Inert connection (tests): park until disposed, mirroring a pipe read that never
+                // completes. Cancellation surfaces as a teardown-classified exception.
+                await Task.Delay(Timeout.Infinite, _cts.Token);
                 return null;
             }
 
-            buffer.Length = bytesRead;
-            AdaptHint(bytesRead, ref _receiveHint, ref _shrinkStreak);
-            return buffer;
+            if (_socket is not null && _waitForData)
+            {
+                // Zero-byte receive before renting so idle connections don't pin a rented buffer.
+                await _receiver!.WaitForDataAsync(_socket);
+            }
+
+            var buffer = TransportBuffer.Rent(_receiveHint);
+            try
+            {
+                var bytesRead = _socket is not null
+                    ? await _receiver!.ReceiveAsync(_socket, buffer.FullMemory)
+                    : await _receiveStream!.ReadAsync(buffer.FullMemory, _cts.Token);
+
+                if (bytesRead == 0)
+                {
+                    buffer.Dispose();
+                    return null;
+                }
+
+                buffer.Length = bytesRead;
+                AdaptHint(bytesRead, ref _receiveHint, ref _shrinkStreak);
+                return buffer;
+            }
+            catch
+            {
+                buffer.Dispose();
+                throw;
+            }
         }
-        catch
+        finally
         {
-            buffer.Dispose();
-            throw;
+            Volatile.Write(ref _receiveActive, 0);
         }
     }
 

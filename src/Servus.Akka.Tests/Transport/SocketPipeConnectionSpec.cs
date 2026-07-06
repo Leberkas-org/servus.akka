@@ -154,6 +154,26 @@ public sealed class SocketPipeConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task ReceiveAsync_should_throw_on_concurrent_entry()
+    {
+        await using var connection = SocketPipeConnection.Create(_client);
+
+        var firstReceive = connection.ReceiveAsync().AsTask();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () => await connection.ReceiveAsync());
+
+        _server.Dispose();
+        try
+        {
+            var buffer = await firstReceive;
+            buffer?.Dispose();
+        }
+        catch (Exception ex) when (ex is SocketException or ObjectDisposedException or OperationCanceledException or IOException)
+        {
+        }
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task OutputWriter_should_send_data_to_socket()
     {
         await using var connection = SocketPipeConnection.Create(_client);
