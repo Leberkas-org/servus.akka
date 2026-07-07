@@ -275,7 +275,10 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
         // StreamConnection's send loop is started via Task.Run without passing the
         // CancellationToken to Task.Run itself (see the comment above _sendLoop's assignment) —
         // disposing immediately after construction exercises the scheduling window where the
-        // loop hasn't started running yet when cancellation/teardown fires.
+        // loop hasn't started running yet when cancellation/teardown fires. If the token were
+        // passed to Task.Run and lost the race, RunSendLoopAsync's body (and its leftover-drain
+        // finally) never runs at all, so anything enqueued before DisposeAsync leaks — observable
+        // via WireBuffer.Capacity staying non-zero instead of collapsing to 0 on dispose.
         for (var i = 0; i < 20; i++)
         {
             using var clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
@@ -286,7 +289,13 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
             var clientStream = new NetworkStream(clientSocket, ownsSocket: false);
 
             var connection = new StreamConnection(clientStream, new TransportConnectionOptions());
+
+            var buffer = MakeBuffer("leak-check"u8.ToArray());
+            Assert.True(connection.TryEnqueue(buffer));
+
             await connection.DisposeAsync();
+
+            Assert.Equal(0, buffer.Capacity);
         }
     }
 
