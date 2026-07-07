@@ -21,9 +21,9 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
         public static readonly Evict Instance = new();
     }
 
-    private sealed class HostState(int maxConnections)
+    private sealed class HostState(QuicTransportOptions options)
     {
-        public readonly int MaxConnections = maxConnections;
+        public readonly QuicTransportOptions Options = options;
         public readonly List<QuicConnectionLease> Leases = [];
         public readonly Queue<Acquire> Pending = new();
         public int Establishing;
@@ -94,7 +94,7 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
             lease.MarkIdle();
         }
 
-        if (host.Leases.Count + host.Establishing < host.MaxConnections)
+        if (host.Leases.Count + host.Establishing < host.Options.MaxConnectionsPerHost)
         {
             Tracing.For("Pool").Debug(this, "Creating connection to {0}:{1}", msg.Options.Host, msg.Options.Port);
             Establish(host, msg);
@@ -210,14 +210,18 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
     {
         foreach (var host in _hosts.Values)
         {
-            var toRemove = host.Leases
-                .Where(l => !l.IsAlive() || (l.ActiveStreams == 0 && l.IsExpired(TimeSpan.FromMinutes(10))))
-                .ToList();
+            var lifetime = host.Options.ConnectionLifetime;
 
-            foreach (var lease in toRemove)
+            // Pop/push in place (mirrors TcpConnectionManagerActor.OnEvict): walk backwards and remove
+            // dead entries by index instead of allocating a LINQ Where/ToList snapshot every tick.
+            for (var i = host.Leases.Count - 1; i >= 0; i--)
             {
-                host.Leases.Remove(lease);
-                await lease.DisposeAsync();
+                var lease = host.Leases[i];
+                if (!lease.IsAlive() || (lease.ActiveStreams == 0 && lease.IsExpired(lifetime)))
+                {
+                    host.Leases.RemoveAt(i);
+                    await lease.DisposeAsync();
+                }
             }
         }
     }
@@ -245,7 +249,7 @@ public sealed class QuicConnectionManagerActor : ReceiveActor, IWithTimers
     {
         if (!_hosts.TryGetValue(options, out var state))
         {
-            state = new HostState(options.MaxConnectionsPerHost);
+            state = new HostState(options);
             _hosts[options] = state;
         }
 

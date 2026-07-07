@@ -316,6 +316,55 @@ public sealed class QuicConnectionManagerActorSpec : TestKit
     }
 
     [Fact(Timeout = 5000)]
+    public async Task Evict_should_remove_idle_lease_past_a_short_configured_lifetime()
+    {
+        var clock = new FakeTimeProvider();
+        var factory = new MockFactory(timeProvider: clock);
+        var actor = CreateActor(factory);
+        var options = CreateOptions() with { ConnectionLifetime = TimeSpan.FromMilliseconds(50) };
+
+        var lease1 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        actor.Tell(new QuicConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        clock.Advance(TimeSpan.FromMilliseconds(200));
+        actor.Tell(QuicConnectionManagerActor.Evict.Instance);
+
+        var lease2 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        Assert.NotSame(lease1, lease2);
+        Assert.Equal(2, factory.EstablishCount);
+
+        await lease2.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Evict_should_never_remove_an_idle_lease_with_infinite_lifetime()
+    {
+        var clock = new FakeTimeProvider();
+        var factory = new MockFactory(timeProvider: clock);
+        var actor = CreateActor(factory);
+        var options = CreateOptions() with { ConnectionLifetime = Timeout.InfiniteTimeSpan };
+
+        var lease1 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+        actor.Tell(new QuicConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        // Advance well past the old hardcoded 10-minute eviction window.
+        clock.Advance(TimeSpan.FromMinutes(30));
+        actor.Tell(QuicConnectionManagerActor.Evict.Instance);
+
+        var lease2 = await QuicConnectionManagerActor.AcquireAsync(actor, options,
+            TestContext.Current.CancellationToken);
+
+        Assert.Same(lease1, lease2);
+        Assert.Equal(1, factory.EstablishCount);
+
+        await lease2.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task Release_should_dispatch_pending_acquire_when_stream_becomes_available()
     {
         var factory = new MockFactory(maxStreams: 1);
