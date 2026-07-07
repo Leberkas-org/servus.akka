@@ -224,30 +224,26 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     [Fact(Timeout = 5000)]
     public async Task QuiesceAsync_should_return_false_when_data_races_in()
     {
-        await using var connection = new StreamConnection(_clientStream, new TransportConnectionOptions());
+        var gated = new GatedReadStream();
+        await using var connection = new StreamConnection(gated, new TransportConnectionOptions());
 
-        var clean = true;
-        for (var attempt = 0; attempt < 200 && clean; attempt++)
-        {
-            var receiveTask = connection.ReceiveAsync().AsTask();
+        var receiveTask = connection.ReceiveAsync().AsTask();
+        await gated.WaitForReadStartedAsync();
 
-            // Push data so the read can complete before quiesce cancels it.
-            await _serverStream.WriteAsync("x"u8.ToArray(), TestContext.Current.CancellationToken);
-            await _serverStream.FlushAsync(TestContext.Current.CancellationToken);
+        // QuiesceAsync cancels the receive CTS, then awaits the settle source because
+        // _receiveActive is still true (ReadAsync is blocked on our gate).
+        var quiesceTask = connection.QuiesceAsync().AsTask();
 
-            clean = await connection.QuiesceAsync();
+        // Complete the read with data — the gated stream ignores the CancellationToken, so
+        // ReceiveDataAsync returns the buffer (no OCE). The settle source fires with
+        // cancelled=false, making QuiesceAsync return false.
+        gated.CompleteRead("x"u8.ToArray());
 
-            try
-            {
-                var buffer = await receiveTask;
-                buffer?.Dispose();
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
-
+        var clean = await quiesceTask;
         Assert.False(clean);
+
+        var buffer = await receiveTask;
+        buffer?.Dispose();
     }
 
     [Fact(Timeout = 5000)]
@@ -394,6 +390,30 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
         Assert.Equal(2, recording.WriteCount);
         Assert.Equal(1, recording.FlushCount);
         Assert.Equal(expected, recording.Written);
+    }
+
+    /// <summary>
+    /// Read-gated stream: blocks <see cref="ReadAsync(Memory{byte}, CancellationToken)"/> until
+    /// <see cref="CompleteRead"/> is called, deliberately ignoring the <see cref="CancellationToken"/>
+    /// so the caller can guarantee that a read completes with data even after the token has been
+    /// cancelled. This makes the quiesce-race test fully deterministic.
+    /// </summary>
+    private sealed class GatedReadStream : MemoryStream
+    {
+        private readonly TaskCompletionSource _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<byte[]> _readData = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task WaitForReadStartedAsync() => _readStarted.Task;
+
+        public void CompleteRead(byte[] data) => _readData.SetResult(data);
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _readStarted.TrySetResult();
+            var data = await _readData.Task;
+            data.CopyTo(buffer);
+            return data.Length;
+        }
     }
 
     /// <summary>
