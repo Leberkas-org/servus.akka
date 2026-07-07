@@ -5,19 +5,19 @@ using Akka.Streams.Stage;
 
 namespace Servus.Akka.Transport.Quic.Client;
 
-internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransportOutbound>, ITransportInbound>>
+internal sealed class QuicConnectionStage : GraphStage<FlowShape<ITransportOutbound, ITransportInbound>>
 {
     private readonly IActorRef _connectionManager;
 
-    private readonly Inlet<List<ITransportOutbound>> _in = new("QuicConnection.In");
+    private readonly Inlet<ITransportOutbound> _in = new("QuicConnection.In");
     private readonly Outlet<ITransportInbound> _out = new("QuicConnection.Out");
 
-    public override FlowShape<List<ITransportOutbound>, ITransportInbound> Shape { get; }
+    public override FlowShape<ITransportOutbound, ITransportInbound> Shape { get; }
 
     public QuicConnectionStage(IActorRef connectionManager)
     {
         _connectionManager = connectionManager;
-        Shape = new FlowShape<List<ITransportOutbound>, ITransportInbound>(_in, _out);
+        Shape = new FlowShape<ITransportOutbound, ITransportInbound>(_in, _out);
     }
 
     protected override GraphStageLogic CreateLogic(Attributes inheritedAttributes)
@@ -35,14 +35,7 @@ internal sealed class QuicConnectionStage : GraphStage<FlowShape<List<ITransport
             _stage = stage;
 
             SetHandler(stage._in,
-                onPush: () =>
-                {
-                    var batch = Grab(stage._in);
-                    foreach (var item in batch)
-                    {
-                        _sm.HandlePush(item);
-                    }
-                },
+                onPush: () => _sm.HandlePush(Grab(stage._in)),
                 onUpstreamFinish: () => _sm.HandleUpstreamFinish());
 
             SetHandler(stage._out,

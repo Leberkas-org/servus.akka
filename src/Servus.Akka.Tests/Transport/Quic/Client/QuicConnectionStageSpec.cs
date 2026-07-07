@@ -22,7 +22,7 @@ public sealed class QuicConnectionStageSpec : TestKit
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, sinkQueue) = Source
-            .Queue<List<ITransportOutbound>>(1, OverflowStrategy.Fail)
+            .Queue<ITransportOutbound>(1, OverflowStrategy.Fail)
             .ViaMaterialized(flow, Keep.Left)
             .ToMaterialized(Sink.Queue<ITransportInbound>(), Keep.Both)
             .Run(_materializer);
@@ -54,13 +54,13 @@ public sealed class QuicConnectionStageSpec : TestKit
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, _) = Source
-            .Queue<List<ITransportOutbound>>(1, OverflowStrategy.Fail)
+            .Queue<ITransportOutbound>(1, OverflowStrategy.Fail)
             .ViaMaterialized(flow, Keep.Left)
             .ToMaterialized(Sink.Queue<ITransportInbound>(), Keep.Both)
             .Run(_materializer);
 
         // Push ConnectTransport
-        await sourceQueue.OfferAsync([new ConnectTransport(options)]);
+        await sourceQueue.OfferAsync(new ConnectTransport(options));
 
         // Expect Acquire message on TestActor from state machine
         var msg = ExpectMsg<QuicConnectionManagerActor.Acquire>(TimeSpan.FromSeconds(2),
@@ -88,16 +88,16 @@ public sealed class QuicConnectionStageSpec : TestKit
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, sinkQueue) = Source
-            .Queue<List<ITransportOutbound>>(2, OverflowStrategy.Fail)
+            .Queue<ITransportOutbound>(2, OverflowStrategy.Fail)
             .ViaMaterialized(flow, Keep.Left)
             .ToMaterialized(Sink.Queue<ITransportInbound>(), Keep.Both)
             .Run(_materializer);
 
-        await sourceQueue.OfferAsync([new ConnectTransport(new QuicTransportOptions
+        await sourceQueue.OfferAsync(new ConnectTransport(new QuicTransportOptions
         {
             Host = "localhost",
             Port = 443
-        })]);
+        }));
 
         var msg = ExpectMsg<QuicConnectionManagerActor.Acquire>(TimeSpan.FromSeconds(2),
             cancellationToken: TestContext.Current.CancellationToken);
@@ -115,18 +115,18 @@ public sealed class QuicConnectionStageSpec : TestKit
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, _) = Source
-            .Queue<List<ITransportOutbound>>(1, OverflowStrategy.Fail)
+            .Queue<ITransportOutbound>(1, OverflowStrategy.Fail)
             .ViaMaterialized(flow, Keep.Left)
             .ToMaterialized(Sink.Queue<ITransportInbound>(), Keep.Both)
             .Run(_materializer);
 
         // Test that the stage properly initializes and can handle lifecycle
         // The OnDownstreamFinish handler is called when downstream cancels
-        await sourceQueue.OfferAsync([new ConnectTransport(new QuicTransportOptions
+        await sourceQueue.OfferAsync(new ConnectTransport(new QuicTransportOptions
         {
             Host = "localhost",
             Port = 443
-        })]);
+        }));
 
         var msg = ExpectMsg<QuicConnectionManagerActor.Acquire>(TimeSpan.FromSeconds(2),
             cancellationToken: TestContext.Current.CancellationToken);
@@ -140,16 +140,16 @@ public sealed class QuicConnectionStageSpec : TestKit
         var flow = Flow.FromGraph(stage);
 
         var (sourceQueue, _) = Source
-            .Queue<List<ITransportOutbound>>(1, OverflowStrategy.Fail)
+            .Queue<ITransportOutbound>(1, OverflowStrategy.Fail)
             .ViaMaterialized(flow, Keep.Left)
             .ToMaterialized(Sink.Queue<ITransportInbound>(), Keep.Both)
             .Run(_materializer);
 
-        await sourceQueue.OfferAsync([new ConnectTransport(new QuicTransportOptions
+        await sourceQueue.OfferAsync(new ConnectTransport(new QuicTransportOptions
         {
             Host = "localhost",
             Port = 443
-        })]);
+        }));
 
         var msg = ExpectMsg<QuicConnectionManagerActor.Acquire>(TimeSpan.FromSeconds(2),
             cancellationToken: TestContext.Current.CancellationToken);

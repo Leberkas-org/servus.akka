@@ -6,19 +6,9 @@ namespace Servus.Akka.Transport.Quic.Client;
 
 public sealed class QuicTransportFactory(IActorRef connectionManager) : ITransportFactory
 {
+    // No conflate batching: per-stream channel send loops (StreamConnection) already coalesce small
+    // buffers into one write, so the stage takes single items — same shape as the server side
+    // (QuicServerConnectionStage).
     public Flow<ITransportOutbound, ITransportInbound, NotUsed> Create()
-    {
-        var conflate = Flow.Create<ITransportOutbound>()
-            .ConflateWithSeed(
-                seed: item => new List<ITransportOutbound> { item },
-                aggregate: (list, item) =>
-                {
-                    list.Add(item);
-                    return list;
-                });
-
-        var stage = Flow.FromGraph(new QuicConnectionStage(connectionManager));
-
-        return conflate.Via(stage);
-    }
+        => Flow.FromGraph(new QuicConnectionStage(connectionManager));
 }
