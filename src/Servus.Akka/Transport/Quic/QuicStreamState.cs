@@ -33,6 +33,13 @@ internal sealed class QuicStreamState : IAsyncDisposable
     internal bool IsAttached => _connection is not null;
 
     /// <summary>
+    /// True while a read is in flight for this stream (armed by <c>RequestStreamRead</c>, cleared by the
+    /// shared completion handler in <see cref="QuicStreamReads"/> before it decides whether to re-arm).
+    /// Enforces at most ONE in-flight read per stream — the pull-gating discipline this type exists for.
+    /// </summary>
+    internal bool ReadArmed { get; set; }
+
+    /// <summary>
     /// Monotonic rent generation. Bumped every time the object leaves the pool (<see cref="Rent"/>) — for
     /// both a fresh instance and a repooled one — so an event produced by a transform captured under an
     /// earlier rent can be detected as stale after the state has been re-rented for a NEW stream.
@@ -93,6 +100,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
         state._direction = direction;
         state._options = options;
         state.Phase = StreamPhase.Opening;
+        state.ReadArmed = false;
 
         // Bump the rent generation and refresh the per-epoch transforms. Incrementing here (rather than
         // only in ResetAfterDispose) covers both a fresh instance and a repooled one uniformly, so an
@@ -115,6 +123,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
         _options = null;
         IsCompleteWritesDeferred = false;
         Phase = StreamPhase.Opening;
+        ReadArmed = false;
     }
 
     public async ValueTask DisposeAndReturnAsync()

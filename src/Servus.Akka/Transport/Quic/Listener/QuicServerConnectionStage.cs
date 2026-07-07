@@ -51,6 +51,13 @@ internal sealed class QuicServerConnectionStage : GraphStage<FlowShape<ITranspor
                     if (_pendingReads.TryDequeue(out var item))
                     {
                         Push(_stage._out, item);
+
+                        // The item's read was deferred when it was queued (see OnPushInbound below) —
+                        // re-arm its stream's read pump now that the item has actually been delivered.
+                        if (item is MultiplexedData data)
+                        {
+                            _sm.NotifyItemDelivered(data.StreamId);
+                        }
                     }
                 },
                 onDownstreamFinish: _ =>
@@ -85,16 +92,16 @@ internal sealed class QuicServerConnectionStage : GraphStage<FlowShape<ITranspor
 
         public override void PostStop() => _sm.PostStop();
 
-        void IConnectionOperations.OnPushInbound(ITransportInbound item)
+        bool IConnectionOperations.OnPushInbound(ITransportInbound item)
         {
             if (IsAvailable(_stage._out))
             {
                 Push(_stage._out, item);
+                return true;
             }
-            else
-            {
-                _pendingReads.Enqueue(item);
-            }
+
+            _pendingReads.Enqueue(item);
+            return false;
         }
 
         void IConnectionOperations.OnSignalPullOutbound()

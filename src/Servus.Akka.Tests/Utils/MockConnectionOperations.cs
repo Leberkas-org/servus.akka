@@ -11,7 +11,11 @@ internal sealed class MockConnectionOperations : IConnectionOperations
     public List<(string Key, TimeSpan Delay)> ScheduledTimers { get; } = [];
     public List<string> CancelledTimers { get; } = [];
 
-    public void OnPushInbound(ITransportInbound item) => PushedInbound.Add(item);
+    public bool OnPushInbound(ITransportInbound item)
+    {
+        PushedInbound.Add(item);
+        return true;
+    }
     public void OnSignalPullOutbound() => PullOutboundCount++;
     public void OnCompleteStage() => CompleteStageCount++;
     public void OnScheduleTimer(string key, TimeSpan delay) => ScheduledTimers.Add((key, delay));

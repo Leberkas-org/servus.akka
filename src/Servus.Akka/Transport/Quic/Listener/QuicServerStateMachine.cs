@@ -12,6 +12,7 @@ internal sealed class QuicServerStateMachine(
     TransportConnectionOptions? connectionOptions = null) : IQuicStreamReadHost
 {
     private const string MigrationCheckTimerKey = "migration-check";
+    private const int MaxSyncReads = 8;
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
 
     private bool _upstreamFinished;
@@ -19,6 +20,7 @@ internal sealed class QuicServerStateMachine(
     private CancellationTokenSource? _acceptCts;
 
     private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
+    private int _syncReadBudget = MaxSyncReads;
 
     internal int ActiveStreamCount => _streams.Count;
 
@@ -218,9 +220,22 @@ internal sealed class QuicServerStateMachine(
     internal QuicStreamState? GetStreamForTest(long streamId)
         => _streams.GetValueOrDefault(StreamTarget.FromId(streamId));
 
+    /// <summary>
+    /// Re-arms the read for a stream whose queued item has just been delivered to downstream (called
+    /// from the stage's onPull dequeue site). No-op if the stream's read is already armed or the stream
+    /// is gone — mirrors the identical guard inside <see cref="RequestStreamRead"/>.
+    /// </summary>
+    internal void NotifyItemDelivered(StreamTarget streamId) => RequestStreamRead(streamId);
+
     private void RequestStreamRead(StreamTarget streamId)
     {
         if (!_streams.TryGetValue(streamId, out var state) || !state.IsAttached)
+        {
+            return;
+        }
+
+        // At most ONE in-flight read per stream: a no-op if a read is already armed for it.
+        if (state.ReadArmed)
         {
             return;
         }
@@ -232,7 +247,22 @@ internal sealed class QuicServerStateMachine(
             return;
         }
 
-        state.ReceiveAsync().PipeTo(self, success: state.ReadSuccess, failure: state.ReadFailure);
+        state.ReadArmed = true;
+
+        var readTask = state.ReceiveAsync();
+
+        if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
+        {
+            // Sync fast-path: this completes on the actor thread within the SAME rent, so the state's
+            // current Epoch is exactly the epoch this read would carry — the guard inside
+            // OnReceiveCompleted is a no-op here, it can never be stale.
+            _syncReadBudget--;
+            QuicStreamReads.OnReceiveCompleted(this, state, readTask.Result, state.Epoch);
+            return;
+        }
+
+        _syncReadBudget = MaxSyncReads;
+        readTask.PipeTo(self, success: state.ReadSuccess, failure: state.ReadFailure);
     }
 
     private void OnInboundComplete(DisconnectReason reason, long rawStreamId)

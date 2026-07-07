@@ -11,7 +11,11 @@ internal sealed class StubOps : IConnectionOperations
     public readonly Dictionary<string, TimeSpan> Timers = new();
     public readonly HashSet<string> CancelledTimers = [];
 
-    public void OnPushInbound(ITransportInbound item) => PushedInbound.Add(item);
+    public bool OnPushInbound(ITransportInbound item)
+    {
+        PushedInbound.Add(item);
+        return true;
+    }
     public void OnSignalPullOutbound() => PullCount++;
     public void OnCompleteStage() => Completed = true;
     public void OnScheduleTimer(string key, TimeSpan delay) => Timers[key] = delay;

@@ -104,18 +104,18 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
 
         public override void PostStop() => _sm.PostStop();
 
-        void IConnectionOperations.OnPushInbound(ITransportInbound item)
+        bool IConnectionOperations.OnPushInbound(ITransportInbound item)
         {
             _readRequested = false;
 
             if (IsAvailable(_stage._out))
             {
                 Push(_stage._out, item);
+                return true;
             }
-            else
-            {
-                _pendingReads.Enqueue(item);
-            }
+
+            _pendingReads.Enqueue(item);
+            return false;
         }
 
         void IConnectionOperations.OnSignalPullOutbound()

@@ -159,6 +159,22 @@ public sealed class QuicStreamDisposalSpec
 
         public Task WaitForDisposalAsync() => _disposed.Task;
 
+        // Deliberately never completes synchronously (or at all, short of cancellation): these tests
+        // drive read completion entirely via manually-dispatched StreamReceiveCompleted events, so the
+        // real read must stay pending — an empty MemoryStream's default ReadAsync would otherwise
+        // synchronously EOF the moment the server SM's sync-read budget (mirroring the client's) issues
+        // the initial read on attach, completing the read before the test gets to assert the interim
+        // (write-completed-but-not-read-completed) state. Cancellation is honored so QuiesceAsync (part
+        // of the real disposal path this test exercises) still settles instead of hanging.
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
+            {
+                return await tcs.Task.ConfigureAwait(false);
+            }
+        }
+
         protected override void Dispose(bool disposing)
         {
             _disposed.TrySetResult();

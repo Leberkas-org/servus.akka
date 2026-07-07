@@ -59,14 +59,24 @@ internal static class QuicStreamReads
             return;
         }
 
+        // The in-flight read this completion represents is done — clear before deciding whether (and
+        // when) to re-arm, so RequestStreamRead never sees a stale "already armed" guard block it.
+        state.ReadArmed = false;
+
         if (buffer is null)
         {
             host.OnInboundComplete(DisconnectReason.Graceful, state.StreamId);
             return;
         }
 
-        host.Ops.OnPushInbound(MultiplexedData.Rent(buffer, streamId));
-        host.RequestStreamRead(streamId);
+        // Re-arm only when the item reached downstream immediately; a queued item's stream is re-armed
+        // later, at the dequeue site in the stage's onPull (see QuicConnectionStage/QuicServerConnectionStage),
+        // which is what keeps _pendingReads bounded by the live-stream count under a slow consumer.
+        var pushedImmediately = host.Ops.OnPushInbound(MultiplexedData.Rent(buffer, streamId));
+        if (pushedImmediately)
+        {
+            host.RequestStreamRead(streamId);
+        }
     }
 
     public static void OnReceiveFailed(IQuicStreamReadHost host, QuicStreamState state, Exception error, int epoch)
@@ -79,6 +89,10 @@ internal static class QuicStreamReads
         {
             return;
         }
+
+        // The in-flight read this failure represents is done — clear regardless of outcome (both
+        // branches below either complete or tear down the stream; neither re-arms it).
+        state.ReadArmed = false;
 
         // A QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/
         // RST_STREAM) — a graceful stream completion, not an error to propagate. Deliberately NOT guarded

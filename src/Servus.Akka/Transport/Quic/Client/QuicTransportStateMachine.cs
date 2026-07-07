@@ -297,9 +297,22 @@ public sealed class QuicTransportStateMachine(
         return state;
     }
 
+    /// <summary>
+    /// Re-arms the read for a stream whose queued item has just been delivered to downstream (called
+    /// from the stage's onPull dequeue site). No-op if the stream's read is already armed or the stream
+    /// is gone — mirrors the identical guard inside <see cref="RequestStreamRead"/>.
+    /// </summary>
+    internal void NotifyItemDelivered(StreamTarget streamId) => RequestStreamRead(streamId);
+
     private void RequestStreamRead(StreamTarget streamId)
     {
         if (!_streams.TryGetValue(streamId, out var state) || !state.IsAttached)
+        {
+            return;
+        }
+
+        // At most ONE in-flight read per stream: a no-op if a read is already armed for it.
+        if (state.ReadArmed)
         {
             return;
         }
@@ -310,6 +323,8 @@ public sealed class QuicTransportStateMachine(
             OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
             return;
         }
+
+        state.ReadArmed = true;
 
         var readTask = state.ReceiveAsync();
 
