@@ -55,10 +55,11 @@ public sealed class QuicTransportEventSpec
 
         var buf = WireBuffer.Rent(4);
         buf.Length = 4;
-        var evt = new StreamReceiveCompleted(state, buf);
+        var evt = new StreamReceiveCompleted(state, buf, state.Epoch);
 
         Assert.Same(state, evt.State);
         Assert.Same(buf, evt.Buffer);
+        Assert.Equal(state.Epoch, evt.Epoch);
         Assert.Equal(42, evt.State.StreamId);
 
         buf.Dispose();
@@ -70,7 +71,7 @@ public sealed class QuicTransportEventSpec
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
         state.ActivateDirectReadForTest(1);
 
-        var evt = new StreamReceiveCompleted(state, null);
+        var evt = new StreamReceiveCompleted(state, null, state.Epoch);
 
         Assert.Same(state, evt.State);
         Assert.Null(evt.Buffer);
@@ -83,10 +84,11 @@ public sealed class QuicTransportEventSpec
         state.ActivateDirectReadForTest(789);
         var error = new IOException("Read failed");
 
-        var evt = new StreamReceiveFailed(state, error);
+        var evt = new StreamReceiveFailed(state, error, state.Epoch);
 
         Assert.Same(error, evt.Error);
         Assert.Same(state, evt.State);
+        Assert.Equal(state.Epoch, evt.Epoch);
         Assert.Equal(789, evt.State.StreamId);
     }
 

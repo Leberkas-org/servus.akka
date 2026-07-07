@@ -34,8 +34,20 @@ internal interface IQuicStreamReadHost
 /// </summary>
 internal static class QuicStreamReads
 {
-    public static void OnReceiveCompleted(IQuicStreamReadHost host, QuicStreamState state, WireBuffer? buffer)
+    public static void OnReceiveCompleted(IQuicStreamReadHost host, QuicStreamState state, WireBuffer? buffer, int epoch)
     {
+        // Epoch guard (first, before touching any state/dict/host): the event was produced by a PipeTo
+        // transform captured at a specific rent generation. QuicStreamState is pooled and always
+        // re-rented after quiesce, so a completion for a now-dead stream can still be in the mailbox when
+        // the object has been re-rented for a NEW stream — at which point its StreamId maps back to itself
+        // and the membership/ReferenceEquals check below would wrongly pass. A mismatched epoch means this
+        // read belongs to a previous rent: drop it and release its buffer before any side effect.
+        if (epoch != state.Epoch)
+        {
+            buffer?.Dispose();
+            return;
+        }
+
         var streamId = StreamTarget.FromId(state.StreamId);
 
         // Identity guard replaces the old CompleteRead never-repool teardown check: if the stream was
@@ -57,8 +69,17 @@ internal static class QuicStreamReads
         host.RequestStreamRead(streamId);
     }
 
-    public static void OnReceiveFailed(IQuicStreamReadHost host, QuicStreamState state, Exception error)
+    public static void OnReceiveFailed(IQuicStreamReadHost host, QuicStreamState state, Exception error, int epoch)
     {
+        // Epoch guard (first, before any host callback): an OperationCanceledException is produced on
+        // EVERY quiesce-cancelled read, so a stale failure from a state that has since been repooled and
+        // re-rented must never route to the host — otherwise it tears down the NEW stream with
+        // DisconnectReason.Error. A mismatched epoch means this failure belongs to a previous rent.
+        if (epoch != state.Epoch)
+        {
+            return;
+        }
+
         // A QuicException on read means the peer closed or reset the stream (FIN/STOP_SENDING/
         // RST_STREAM) — a graceful stream completion, not an error to propagate. Deliberately NOT guarded
         // by stream membership: a connection-level failure must still tear the transport down even when the

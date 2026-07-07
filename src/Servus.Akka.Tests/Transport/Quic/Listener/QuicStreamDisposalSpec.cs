@@ -48,7 +48,7 @@ public sealed class QuicStreamDisposalSpec
         var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new StreamReceiveCompleted(state, null));
+        sm.Dispatch(new StreamReceiveCompleted(state, null, state.Epoch));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -66,7 +66,7 @@ public sealed class QuicStreamDisposalSpec
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new StreamReceiveCompleted(state, null));
+        sm.Dispatch(new StreamReceiveCompleted(state, null, state.Epoch));
         Assert.Equal(0, sm.ActiveStreamCount);
     }
 
@@ -97,7 +97,8 @@ public sealed class QuicStreamDisposalSpec
         Assert.Equal(1, sm.ActiveStreamCount);
         Assert.Contains(ops.PushedInbound, item => item is ServerStreamAccepted { Id.Value: 4 });
 
-        sm.Dispatch(new StreamReceiveCompleted(sm.GetStreamForTest(4)!, null));
+        var lifecycleState = sm.GetStreamForTest(4)!;
+        sm.Dispatch(new StreamReceiveCompleted(lifecycleState, null, lifecycleState.Epoch));
         sm.HandlePush(new CompleteWrites(4));
 
         Assert.Equal(0, sm.ActiveStreamCount);
@@ -120,7 +121,8 @@ public sealed class QuicStreamDisposalSpec
         sm.HandlePush(new CompleteWrites(4));
         Assert.Equal(1, sm.ActiveStreamCount);
 
-        sm.Dispatch(new StreamReceiveCompleted(sm.GetStreamForTest(4)!, null));
+        var readState = sm.GetStreamForTest(4)!;
+        sm.Dispatch(new StreamReceiveCompleted(readState, null, readState.Epoch));
         Assert.Equal(0, sm.ActiveStreamCount);
 
         await trackingStream.WaitForDisposalAsync();
@@ -144,7 +146,7 @@ public sealed class QuicStreamDisposalSpec
         for (var i = 0; i < 150; i++)
         {
             var streamId = i * 4;
-            sm.Dispatch(new StreamReceiveCompleted(states[streamId], null));
+            sm.Dispatch(new StreamReceiveCompleted(states[streamId], null, states[streamId].Epoch));
             sm.HandlePush(new CompleteWrites(streamId));
         }
 

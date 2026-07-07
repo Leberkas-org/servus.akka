@@ -53,12 +53,12 @@ public sealed class QuicServerStateMachineSpec
         var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        return new StreamReceiveCompleted(state, buf);
+        return new StreamReceiveCompleted(state, buf, state.Epoch);
     }
 
     private static StreamReceiveCompleted CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new StreamReceiveCompleted(state, null);
+        return new StreamReceiveCompleted(state, null, state.Epoch);
     }
 
     [Fact(Timeout = 5000)]
@@ -299,7 +299,7 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_should_push_StreamClosed()
+    public void Dispatch_StreamReceiveFailed_should_push_StreamClosed()
     {
         var (sm, ops) = CreateStateMachine();
         sm.Start();
@@ -307,7 +307,7 @@ public sealed class QuicServerStateMachineSpec
         var state = sm.RegisterTestStream(1, StreamDirection.Bidirectional);
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed"), state.Epoch));
 
         Assert.Contains(ops.PushedInbound,
             item => item is StreamClosed { Id.Value: 1, Reason: DisconnectReason.Error });

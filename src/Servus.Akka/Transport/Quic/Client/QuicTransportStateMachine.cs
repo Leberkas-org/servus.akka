@@ -65,10 +65,10 @@ public sealed class QuicTransportStateMachine(
                 OnAcquisitionFailed(e.Error);
                 break;
             case StreamReceiveCompleted e:
-                QuicStreamReads.OnReceiveCompleted(this, e.State, e.Buffer);
+                QuicStreamReads.OnReceiveCompleted(this, e.State, e.Buffer, e.Epoch);
                 break;
             case StreamReceiveFailed e:
-                QuicStreamReads.OnReceiveFailed(this, e.State, e.Error);
+                QuicStreamReads.OnReceiveFailed(this, e.State, e.Error, e.Epoch);
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
@@ -315,8 +315,11 @@ public sealed class QuicTransportStateMachine(
 
         if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
         {
+            // Sync fast-path: this completes on the actor thread within the SAME rent, so the state's
+            // current Epoch is exactly the epoch this read would carry — the guard inside
+            // OnReceiveCompleted is a no-op here, it can never be stale.
             _syncReadBudget--;
-            QuicStreamReads.OnReceiveCompleted(this, state, readTask.Result);
+            QuicStreamReads.OnReceiveCompleted(this, state, readTask.Result, state.Epoch);
             return;
         }
 

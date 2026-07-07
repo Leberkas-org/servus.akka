@@ -1,3 +1,4 @@
+using System.Buffers;
 using Akka.Actor;
 using Servus.Akka.Tests.Utils;
 using Servus.Akka.Transport;
@@ -48,12 +49,12 @@ public sealed class QuicTransportStateMachineSpec
         var buf = WireBuffer.Rent(data.Length);
         data.CopyTo(buf.FullMemory.Span);
         buf.Length = data.Length;
-        return new StreamReceiveCompleted(state, buf);
+        return new StreamReceiveCompleted(state, buf, state.Epoch);
     }
 
     private static StreamReceiveCompleted CreateCompletedReadEvent(QuicStreamState state)
     {
-        return new StreamReceiveCompleted(state, null);
+        return new StreamReceiveCompleted(state, null, state.Epoch);
     }
 
     private static QuicStreamState CreateDetachedStreamState(long streamId)
@@ -327,12 +328,13 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_for_unknown_stream_should_handle_gracefully()
+    public void Dispatch_StreamReceiveFailed_for_unknown_stream_should_handle_gracefully()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
 
-        sm.Dispatch(new StreamReceiveFailed(CreateDetachedStreamState(1), new IOException("Read failed")));
+        var state = CreateDetachedStreamState(1);
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed"), state.Epoch));
 
         Assert.Empty(ops.PushedInbound);
     }
@@ -479,7 +481,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_should_push_StreamClosed()
+    public void Dispatch_StreamReceiveFailed_should_push_StreamClosed()
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
@@ -488,7 +490,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed"), state.Epoch));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);
@@ -497,7 +499,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_with_QuicException_should_complete_stream_gracefully()
+    public void Dispatch_StreamReceiveFailed_with_QuicException_should_complete_stream_gracefully()
     {
         // QuicException on read = peer closed/reset the stream (FIN/STOP_SENDING/RST_STREAM):
         // classified on the actor as a graceful stream completion, not an error.
@@ -509,7 +511,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
 
         sm.Dispatch(new StreamReceiveFailed(state,
-            new System.Net.Quic.QuicException(System.Net.Quic.QuicError.StreamAborted, null, "aborted")));
+            new System.Net.Quic.QuicException(System.Net.Quic.QuicError.StreamAborted, null, "aborted"), state.Epoch));
 
         var completed = ops.PushedInbound.OfType<StreamReadCompleted>().FirstOrDefault();
         Assert.NotNull(completed);
@@ -619,7 +621,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_with_auto_reconnect_should_push_transient_disconnect()
+    public void Dispatch_StreamReceiveFailed_with_auto_reconnect_should_push_transient_disconnect()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
@@ -639,7 +641,7 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
 
         sm.Dispatch(new StreamReceiveFailed(
-            state, new ObjectDisposedException("Connection disposed")));
+            state, new ObjectDisposedException("Connection disposed"), state.Epoch));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -648,7 +650,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_without_auto_reconnect_upstream_finished_should_complete()
+    public void Dispatch_StreamReceiveFailed_without_auto_reconnect_upstream_finished_should_complete()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
@@ -668,8 +670,9 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
         ops.Completed = false;
 
+        var upstreamFinishedState = CreateDetachedStreamState(1);
         sm.Dispatch(new StreamReceiveFailed(
-            CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
+            upstreamFinishedState, new ObjectDisposedException("Connection disposed"), upstreamFinishedState.Epoch));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -679,7 +682,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_without_auto_reconnect_upstream_not_finished_should_pull()
+    public void Dispatch_StreamReceiveFailed_without_auto_reconnect_upstream_not_finished_should_pull()
     {
         var ops = new StubOps();
         var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
@@ -694,8 +697,9 @@ public sealed class QuicTransportStateMachineSpec
         ops.PushedInbound.Clear();
         ops.PullCount = 0;
 
+        var notFinishedState = CreateDetachedStreamState(1);
         sm.Dispatch(new StreamReceiveFailed(
-            CreateDetachedStreamState(1), new ObjectDisposedException("Connection disposed")));
+            notFinishedState, new ObjectDisposedException("Connection disposed"), notFinishedState.Epoch));
 
         var disconnected = ops.PushedInbound.OfType<TransportDisconnected>().FirstOrDefault();
         Assert.NotNull(disconnected);
@@ -733,7 +737,7 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispatch_PipeStreamReadFailed_should_remove_stream_on_error()
+    public void Dispatch_StreamReceiveFailed_should_remove_stream_on_error()
     {
         var (ops, sm) = CreateConnectedStateMachine();
 
@@ -742,7 +746,7 @@ public sealed class QuicTransportStateMachineSpec
 
         ops.PushedInbound.Clear();
 
-        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed")));
+        sm.Dispatch(new StreamReceiveFailed(state, new IOException("Read failed"), state.Epoch));
 
         var closed = ops.PushedInbound.OfType<StreamClosed>().FirstOrDefault();
         Assert.NotNull(closed);
@@ -800,5 +804,88 @@ public sealed class QuicTransportStateMachineSpec
         Assert.NotNull(migrated);
         Assert.Equal(oldEndPoint, migrated.OldEndPoint);
         Assert.Equal(newEndPoint, migrated.NewEndPoint);
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Stale_StreamReceiveCompleted_after_repool_should_be_dropped()
+    {
+        // Vector A: a success completion produced by PipeTo for a now-dead stream is still in the mailbox
+        // when its QuicStreamState is repooled and re-rented for a NEW stream. Without the epoch guard the
+        // membership/ReferenceEquals check passes (the re-rented state's id maps back to itself), so the
+        // stale buffer is pushed as the new stream's data.
+        var (ops, sm) = CreateConnectedStateMachine();
+
+        // Arm state A for a stream and capture its ReadSuccess event (buffer + the epoch it was armed at).
+        var stateA = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        stateA.ActivateDirectReadForTest(1);
+        var owner = new TrackingMemoryOwner(4);
+        var staleBuffer = WireBuffer.Wrap(owner, 0, 4);
+        var staleEvent = (StreamReceiveCompleted)stateA.ReadSuccess(staleBuffer);
+
+        // Repool A and re-rent the SAME instance as a NEW stream (id 2) — this bumps A's epoch.
+        await stateA.DisposeAndReturnAsync();
+        var reused = ReRentSameInstanceAsStream(sm, stateA, 2);
+        Assert.Same(stateA, reused);
+
+        ops.PushedInbound.Clear();
+        sm.Dispatch(staleEvent);
+
+        Assert.DoesNotContain(ops.PushedInbound, i => i is MultiplexedData);
+        Assert.True(owner.Disposed, "the epoch guard must dispose the stale completion's buffer");
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Stale_StreamReceiveFailed_with_OCE_after_repool_should_not_teardown_new_stream()
+    {
+        // Vector B: an OperationCanceledException is produced on EVERY quiesce-cancelled read. If such a
+        // stale failure reaches the host after the state has been re-rented, it tears down the NEW stream
+        // with DisconnectReason.Error. The epoch guard must drop it before any host callback.
+        var (ops, sm) = CreateConnectedStateMachine();
+
+        var stateA = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
+        stateA.ActivateDirectReadForTest(1);
+        var staleFailure = (StreamReceiveFailed)stateA.ReadFailure(new OperationCanceledException());
+
+        await stateA.DisposeAndReturnAsync();
+        var reused = ReRentSameInstanceAsStream(sm, stateA, 2);
+        Assert.Same(stateA, reused);
+
+        ops.PushedInbound.Clear();
+        sm.Dispatch(staleFailure);
+
+        Assert.DoesNotContain(ops.PushedInbound, i => i is StreamClosed);
+    }
+
+    // Drains the shared QuicStreamState pool (holding the drained instances so they are not handed back on
+    // the next Rent) until it hands the target instance back, registering it under a new stream id. Mirrors
+    // the set-membership repool pattern in QuicStreamStateSpec and is robust against the process-wide pool
+    // being shared with other test classes.
+    private static QuicStreamState ReRentSameInstanceAsStream(
+        QuicTransportStateMachine sm, QuicStreamState target, long newStreamId)
+    {
+        for (var i = 0; i < 512; i++)
+        {
+            var candidate = sm.RegisterTestStream(newStreamId, StreamDirection.Bidirectional);
+            if (ReferenceEquals(candidate, target))
+            {
+                return candidate;
+            }
+        }
+
+        Assert.Fail("pool did not hand the repooled instance back within the drain budget");
+        return null!;
+    }
+
+    private sealed class TrackingMemoryOwner : IMemoryOwner<byte>
+    {
+        private readonly byte[] _array;
+
+        public TrackingMemoryOwner(int size) => _array = new byte[size];
+
+        public bool Disposed { get; private set; }
+
+        public Memory<byte> Memory => _array;
+
+        public void Dispose() => Disposed = true;
     }
 }

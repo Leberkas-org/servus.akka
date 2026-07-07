@@ -33,20 +33,43 @@ internal sealed class QuicStreamState : IAsyncDisposable
     internal bool IsAttached => _connection is not null;
 
     /// <summary>
-    /// Cached PipeTo transforms — pure wrappers that only capture <c>this</c> and package the raw
+    /// Monotonic rent generation. Bumped every time the object leaves the pool (<see cref="Rent"/>) — for
+    /// both a fresh instance and a repooled one — so an event produced by a transform captured under an
+    /// earlier rent can be detected as stale after the state has been re-rented for a NEW stream.
+    /// </summary>
+    public int Epoch { get; private set; }
+
+    private ReadTransforms _transforms = null!;
+
+    /// <summary>
+    /// Cached PipeTo transforms — pure wrappers that capture only <c>(this, Epoch)</c> and package the raw
     /// completion into an event. They run on IO-completion threads and deliberately touch NO mutable
     /// state; all buffer/lifecycle handling happens on the actor when the event is dispatched. This is
     /// the same model as <see cref="Tcp.ReadEventState"/> and keeps every field on this class
-    /// actor-confined (no fences, no Interlocked). Buffer ownership during an in-flight read lives inside
+    /// actor-confined (no fences, no Interlocked). The transforms are per-epoch (refreshed in
+    /// <see cref="Rent"/>), so every produced event carries the epoch it was armed under — still zero
+    /// per-read allocation. Buffer ownership during an in-flight read lives inside
     /// <see cref="StreamConnection"/>, so there is no per-state pending-buffer bookkeeping here.
     /// </summary>
-    internal readonly Func<WireBuffer?, IQuicTransportEvent> ReadSuccess;
-    internal readonly Func<Exception, IQuicTransportEvent> ReadFailure;
+    internal Func<WireBuffer?, IQuicTransportEvent> ReadSuccess => _transforms.ReadSuccess;
+    internal Func<Exception, IQuicTransportEvent> ReadFailure => _transforms.ReadFailure;
 
     private QuicStreamState()
     {
-        ReadSuccess = buffer => new StreamReceiveCompleted(this, buffer);
-        ReadFailure = ex => new StreamReceiveFailed(this, ex);
+    }
+
+    /// <summary>
+    /// Per-epoch transform holder: the delegates capture <c>(state, epoch)</c> immutably, so
+    /// <c>PipeTo</c> allocates nothing per read while the epoch stamped on every produced event follows
+    /// the rent generation. Refreshed once per rent — exactly like <see cref="Tcp.ReadEventState"/>.
+    /// </summary>
+    private sealed class ReadTransforms(QuicStreamState state, int epoch)
+    {
+        public readonly Func<WireBuffer?, IQuicTransportEvent> ReadSuccess =
+            buffer => new StreamReceiveCompleted(state, buffer, epoch);
+
+        public readonly Func<Exception, IQuicTransportEvent> ReadFailure =
+            ex => new StreamReceiveFailed(state, ex, epoch);
     }
 
     /// <summary>
@@ -70,6 +93,12 @@ internal sealed class QuicStreamState : IAsyncDisposable
         state._direction = direction;
         state._options = options;
         state.Phase = StreamPhase.Opening;
+
+        // Bump the rent generation and refresh the per-epoch transforms. Incrementing here (rather than
+        // only in ResetAfterDispose) covers both a fresh instance and a repooled one uniformly, so an
+        // in-flight event captured under the previous rent is always detectable as stale.
+        state.Epoch++;
+        state._transforms = new ReadTransforms(state, state.Epoch);
         return state;
     }
 

@@ -50,10 +50,10 @@ internal sealed class QuicServerStateMachine(
         switch (evt)
         {
             case StreamReceiveCompleted e:
-                QuicStreamReads.OnReceiveCompleted(this, e.State, e.Buffer);
+                QuicStreamReads.OnReceiveCompleted(this, e.State, e.Buffer, e.Epoch);
                 break;
             case StreamReceiveFailed e:
-                QuicStreamReads.OnReceiveFailed(this, e.State, e.Error);
+                QuicStreamReads.OnReceiveFailed(this, e.State, e.Error, e.Epoch);
                 break;
             case InboundStreamAccepted e:
                 OnInboundStreamAccepted(e.Stream, e.StreamId);
