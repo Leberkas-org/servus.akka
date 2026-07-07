@@ -13,6 +13,7 @@ internal sealed record TransportConnectionOptions
     public long OutputLowWatermark { get; init; } = 32 * 1024;
     public int MaxSyncReads { get; init; } = 8;
     public int? MaxBytesPerSend { get; init; }
+    public int CoalesceThreshold { get; init; } = 16 * 1024;
 
     internal static TransportConnectionOptions FromListener(ListenerOptions listener) => new()
     {

@@ -15,18 +15,21 @@ internal sealed class StreamConnection : DuplexConnectionBase
 {
     private readonly Stream _stream;
     private readonly bool _quicAware;
+    private readonly int _coalesceThreshold;
 
     public StreamConnection(Stream stream, TransportConnectionOptions options, bool quicAware = false)
         : base(options.ReceiveBufferHint)
     {
         _stream = stream;
         _quicAware = quicAware;
+        _coalesceThreshold = quicAware ? 4 * 1024 : options.CoalesceThreshold;
     }
 
     internal StreamConnection(Stream stream, TransportConnectionOptions options, Task? sendLoopStartGate)
         : base(options.ReceiveBufferHint, sendLoopStartGate)
     {
         _stream = stream;
+        _coalesceThreshold = options.CoalesceThreshold;
     }
 
     protected override async ValueTask<WireBuffer?> ReceiveDataAsync(CancellationToken ct)
@@ -72,7 +75,7 @@ internal sealed class StreamConnection : DuplexConnectionBase
         for (var i = 0; i < batch.Count; i++)
         {
             total += batch[i].Length;
-            if (batch[i].Length >= 4 * 1024)
+            if (batch[i].Length >= _coalesceThreshold)
             {
                 allSmall = false;
             }
