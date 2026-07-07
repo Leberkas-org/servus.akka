@@ -1,6 +1,6 @@
 namespace Servus.Akka.Transport;
 
-public interface IConnectionOperations
+internal interface IConnectionOperations
 {
     /// <summary>
     /// Pushes an inbound item toward the stage's outlet. Returns true when the item was pushed

@@ -55,9 +55,6 @@ public sealed class WireBuffer : IMemoryOwner<byte>
         return buf;
     }
 
-    // Migration bridge: wraps an external IMemoryOwner whose memory is array-backed. The buffer
-    // owns 'owner' and disposes it on Dispose. Transport hot paths use the array overloads; this
-    // exists for consumers (GaudiHTTP) whose data already lives in a foreign owner.
     public static WireBuffer Wrap(IMemoryOwner<byte> owner, int offset, int length)
     {
         if (!System.Runtime.InteropServices.MemoryMarshal.TryGetArray<byte>(owner.Memory, out var seg))
@@ -88,18 +85,16 @@ public sealed class WireBuffer : IMemoryOwner<byte>
 
     public void Dispose()
     {
-        var array = Interlocked.Exchange(ref _array, null);
+        var array = _array;
         if (array is null)
         {
-            // Double-dispose: the first Dispose already returned this wrapper to the pool. Returning
-            // it AGAIN would hand the same instance to two renters (buffer aliasing / silent
-            // cross-connection corruption). Log the culprit and bail.
             Tracing.For("Transport").Warning(this,
                 "WireBuffer double-dispose detected — wrapper NOT re-returned to pool. Stack: {0}",
                 Environment.StackTrace);
             return;
         }
 
+        _array = null;
         _returnPool?.Return(array);
         _returnPool = null;
         _externalOwner?.Dispose();

@@ -23,13 +23,37 @@ internal readonly record struct AcquisitionFailed(Exception Error) : IQuicTransp
 /// <see cref="WireBuffer"/> (ownership transfers to the handler) or null on EOF. <see cref="Epoch"/> is
 /// the <see cref="QuicStreamState.Epoch"/> the read was armed under.
 /// </summary>
-internal readonly record struct StreamReceiveCompleted(QuicStreamState State, WireBuffer? Buffer, int Epoch) : IQuicTransportEvent;
+internal sealed class StreamReceiveCompleted : IQuicTransportEvent
+{
+    public QuicStreamState State { get; }
+    public WireBuffer? Buffer { get; }
+    public int Epoch { get; }
+
+    public StreamReceiveCompleted(QuicStreamState state, WireBuffer? buffer, int epoch)
+    {
+        State = state;
+        Buffer = buffer;
+        Epoch = epoch;
+    }
+}
 
 /// <summary>
 /// A stream receive faulted; the exception is classified on the actor. <see cref="Epoch"/> is the
 /// <see cref="QuicStreamState.Epoch"/> the read was armed under.
 /// </summary>
-internal readonly record struct StreamReceiveFailed(QuicStreamState State, Exception Error, int Epoch) : IQuicTransportEvent;
+internal sealed class StreamReceiveFailed : IQuicTransportEvent
+{
+    public QuicStreamState State { get; }
+    public Exception Error { get; }
+    public int Epoch { get; }
+
+    public StreamReceiveFailed(QuicStreamState state, Exception error, int epoch)
+    {
+        State = state;
+        Error = error;
+        Epoch = epoch;
+    }
+}
 
 internal readonly record struct InboundStreamAccepted(Stream Stream, long StreamId) : IQuicTransportEvent;
 

@@ -1,6 +1,4 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Net.Security;
-using System.Net.Sockets;
 using Akka.Actor;
 using Akka.Streams;
 using Akka.Streams.Stage;
@@ -9,12 +7,9 @@ namespace Servus.Akka.Transport.Tcp.Listener;
 
 internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransportOutbound, ITransportInbound>>
 {
-    private readonly Stream _stream;
+    private readonly IDuplexConnection _connection;
     private readonly ConnectionInfo _connectionInfo;
-    private readonly SslStream? _sslStream;
-    private readonly bool _allowDelayedNegotiation;
-    private readonly TransportConnectionOptions? _connectionOptions;
-    private readonly Socket? _socket;
+    private readonly TransportConnectionOptions _connectionOptions;
 
     private readonly Inlet<ITransportOutbound> _in = new("TcpServerConnection.In");
     private readonly Outlet<ITransportInbound> _out = new("TcpServerConnection.Out");
@@ -22,19 +17,13 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
     public override FlowShape<ITransportOutbound, ITransportInbound> Shape { get; }
 
     public TcpServerConnectionStage(
-        Stream stream,
+        IDuplexConnection connection,
         ConnectionInfo connectionInfo,
-        SslStream? sslStream = null,
-        bool allowDelayedNegotiation = false,
-        TransportConnectionOptions? connectionOptions = null,
-        Socket? socket = null)
+        TransportConnectionOptions connectionOptions)
     {
-        _stream = stream;
+        _connection = connection;
         _connectionInfo = connectionInfo;
-        _sslStream = sslStream;
-        _allowDelayedNegotiation = allowDelayedNegotiation;
         _connectionOptions = connectionOptions;
-        _socket = socket;
         Shape = new FlowShape<ITransportOutbound, ITransportInbound>(_in, _out);
     }
 
@@ -83,9 +72,8 @@ internal sealed class TcpServerConnectionStage : GraphStage<FlowShape<ITransport
         {
             var stageActor = GetStageActor(OnReceive);
             _sm = new TcpServerStateMachine(
-                this, stageActor.Ref, _stage._stream, _stage._connectionInfo,
-                _stage._sslStream, _stage._allowDelayedNegotiation,
-                _stage._connectionOptions, _stage._socket);
+                this, stageActor.Ref,
+                _stage._connection, _stage._connectionInfo, _stage._connectionOptions);
             _sm.Start();
             Pull(_stage._in);
         }

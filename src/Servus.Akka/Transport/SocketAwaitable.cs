@@ -10,14 +10,12 @@ internal sealed class SocketAwaitable()
 {
     private ManualResetValueTaskSourceCore<int> _core;
     private List<ArraySegment<byte>>? _bufferList;
+    private int _maxBytesPerSend;
 
-    /// <summary>
-    /// TEST-ONLY seam. When set, no single socket operation is handed more than this many bytes, which
-    /// forces the caller's partial-send remainder loop to iterate deterministically (real short sends,
-    /// not timing-dependent). Unset in production; the guard is a single nullable branch per send with
-    /// no allocation or extra syscall on the hot path.
-    /// </summary>
-    internal int? MaxBytesPerSendForTest;
+    internal void Configure(TransportConnectionOptions options)
+    {
+        _maxBytesPerSend = options.MaxBytesPerSend ?? 0;
+    }
 
     public ValueTask<int> ReceiveAsync(Socket socket, Memory<byte> buffer)
     {
@@ -51,17 +49,15 @@ internal sealed class SocketAwaitable()
     public ValueTask<int> SendAsync(Socket socket, ReadOnlyMemory<byte> buffer)
     {
         _core.Reset();
-        // A prior gather send may have left BufferList set; SocketAsyncEventArgs forbids Buffer and
-        // BufferList being set at once, so clear it before switching to single-buffer mode.
         if (BufferList is not null)
         {
             BufferList = null;
         }
 
         var toSend = MemoryMarshal.AsMemory(buffer);
-        if (MaxBytesPerSendForTest is int cap && toSend.Length > cap)
+        if (_maxBytesPerSend > 0 && toSend.Length > _maxBytesPerSend)
         {
-            toSend = toSend[..cap];
+            toSend = toSend[.._maxBytesPerSend];
         }
 
         SetBuffer(toSend);
@@ -78,9 +74,6 @@ internal sealed class SocketAwaitable()
         return new ValueTask<int>(BytesTransferred);
     }
 
-    // Vectored send: hand the whole multi-segment sequence to the kernel as a single scatter-gather
-    // writev instead of one syscall per segment. Single-segment buffers fall through to the simple
-    // single-buffer path. This is the path that lets pipelined responses leave in one socket write.
     public ValueTask<int> SendAsync(Socket socket, in ReadOnlySequence<byte> buffers)
     {
         if (buffers.IsSingleSegment)
@@ -103,10 +96,6 @@ internal sealed class SocketAwaitable()
         return new ValueTask<int>(BytesTransferred);
     }
 
-    // Vectored send over a list of owned WireBuffers: hands the whole batch to the kernel as a single
-    // scatter-gather writev. SAEA does NOT guarantee a full transfer, so this loops on BytesTransferred
-    // and rebuilds the segment list from the unsent tail until every byte is written, returning the
-    // batch's total byte count.
     public async ValueTask<int> SendManyAsync(Socket socket, IReadOnlyList<WireBuffer> buffers)
     {
         var total = 0;
@@ -144,8 +133,6 @@ internal sealed class SocketAwaitable()
                 break;
             }
 
-            // Advance the (index, offset) cursor past the bytes that were actually sent so the next
-            // pass re-issues only the unsent tail.
             var advance = transferred;
             while (advance > 0)
             {
@@ -172,8 +159,7 @@ internal sealed class SocketAwaitable()
         var list = _bufferList ??= new List<ArraySegment<byte>>();
         list.Clear();
 
-        // TEST-ONLY: cap total bytes handed to the kernel so the SendManyAsync remainder loop iterates.
-        var budget = MaxBytesPerSendForTest ?? int.MaxValue;
+        var budget = _maxBytesPerSend > 0 ? _maxBytesPerSend : int.MaxValue;
 
         for (var i = startIndex; i < buffers.Count && budget > 0; i++)
         {
@@ -199,8 +185,6 @@ internal sealed class SocketAwaitable()
             budget -= segCount;
         }
 
-        // SocketAsyncEventArgs forbids Buffer and BufferList being set at once; clear any single buffer
-        // left by a prior send before assigning the gather list.
         SetBuffer(null, 0, 0);
         BufferList = list;
     }
@@ -212,9 +196,6 @@ internal sealed class SocketAwaitable()
 
         foreach (var segment in buffers)
         {
-            // Pipe segments are rented from MemoryPool<byte>.Shared, which is array-backed, so
-            // TryGetArray always succeeds. Guard anyway so a non-array segment fails loudly rather
-            // than silently sending nothing.
             if (!MemoryMarshal.TryGetArray(segment, out var array))
             {
                 throw new InvalidOperationException("Send buffer segment is not backed by an array.");
@@ -223,8 +204,6 @@ internal sealed class SocketAwaitable()
             list.Add(array);
         }
 
-        // SocketAsyncEventArgs forbids Buffer and BufferList being set at once; clear any single
-        // buffer left by a prior send before assigning the gather list.
         SetBuffer(null, 0, 0);
         BufferList = list;
     }

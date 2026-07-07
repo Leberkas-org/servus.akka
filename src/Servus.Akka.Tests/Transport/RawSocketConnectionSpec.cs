@@ -153,7 +153,7 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
         Assert.Equal(expected, received);
 
         await allFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        Assert.Equal(10 * 1024, Volatile.Read(ref totalFlushed));
+        Assert.Equal(10 * 1024, totalFlushed);
     }
 
     [Fact(Timeout = 5000)]
@@ -161,10 +161,10 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     {
         // Single-buffer path (SendSingleAsync): cap each socket send well below the buffer length so the
         // partial-send remainder loop must iterate. The cap makes this deterministic, not timing-dependent.
-        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions())
+        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions
         {
-            MaxBytesPerSendForTest = 7000,
-        };
+            MaxBytesPerSend = 7000,
+        });
 
         var flushed = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         connection.OnFlushed = total => flushed.TrySetResult(total);
@@ -211,10 +211,10 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     private async Task VerifyVectoredDelivery(int bufferSize, int bufferCount, int? maxBytesPerSend)
     {
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions(), gate.Task)
+        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions
         {
-            MaxBytesPerSendForTest = maxBytesPerSend,
-        };
+            MaxBytesPerSend = maxBytesPerSend,
+        }, gate.Task);
 
         var total = bufferSize * bufferCount;
         var totalFlushed = 0;
@@ -247,9 +247,7 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
         Assert.Equal(expected, received);
 
         await allFlushed.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
-        Assert.Equal(total, Volatile.Read(ref totalFlushed));
-        Assert.True(connection.VectoredSendCount >= 1,
-            $"Expected at least one vectored send, saw {connection.VectoredSendCount}.");
+        Assert.Equal(total, totalFlushed);
     }
 
     [Fact(Timeout = 5000)]

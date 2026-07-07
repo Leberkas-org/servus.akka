@@ -3,7 +3,7 @@ using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Tcp.Client;
 
-public sealed class TcpConnectionStateMachine(
+internal sealed class TcpConnectionStateMachine(
     IConnectionOperations ops,
     IActorRef connectionManager,
     IPoolingStrategy poolingStrategy,
@@ -22,11 +22,9 @@ public sealed class TcpConnectionStateMachine(
     // acquisition. Orphan-disposed on PostStop / reconnect.
     private readonly Queue<WireBuffer> _preConnectWrites = new();
 
-    // Outbound bytes handed to the connection's send queue that have not yet been reported flushed.
-    // Drives watermark backpressure: upstream is pulled only while this stays below the high mark.
     private long _bytesInFlight;
-    private long _highWatermark = new TransportConnectionOptions().OutputHighWatermark;
-    private long _lowWatermark = new TransportConnectionOptions().OutputLowWatermark;
+    private long _highWatermark = 64 * 1024;
+    private long _lowWatermark = 32 * 1024;
 
     private bool _readInProgress;
     private int _syncReadBudget = MaxSyncReads;
@@ -37,9 +35,6 @@ public sealed class TcpConnectionStateMachine(
     private ReadEventState _readState = new(0);
 
     private IDuplexConnection? Connection => _currentLease?.Connection;
-
-    /// <summary>TEST-ONLY. The cached read transforms for the current generation.</summary>
-    internal ReadEventState ReadState => _readState;
 
     internal void Dispatch(ITcpTransportEvent evt)
     {

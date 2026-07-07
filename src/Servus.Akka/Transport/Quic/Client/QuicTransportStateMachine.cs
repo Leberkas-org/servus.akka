@@ -1,19 +1,20 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using Akka.Actor;
 using static Servus.Senf;
 
 namespace Servus.Akka.Transport.Quic.Client;
 
-public sealed class QuicTransportStateMachine(
-    IConnectionOperations ops,
-    IActorRef connectionManager,
-    IActorRef self) : IQuicStreamReadHost
+internal sealed class QuicTransportStateMachine : IQuicStreamReadHost
 {
     private const string ConnectTimerKey = "connect-timeout";
     private const string MigrationCheckTimerKey = "migration-check";
     private const int MaxSyncReads = 8;
     private static readonly TimeSpan MigrationCheckInterval = TimeSpan.FromSeconds(5);
+
+    private readonly IConnectionOperations _ops;
+    private readonly IActorRef _connectionManager;
+    private readonly IActorRef _self;
+    private readonly QuicStreamLifecycle _lifecycle;
 
     private QuicConnectionHandle? _connectionHandle;
     private QuicConnectionLease? _connectionLease;
@@ -26,18 +27,25 @@ public sealed class QuicTransportStateMachine(
     private CancellationTokenSource? _acceptCts;
     private EndPoint? _lastRemoteEndPoint;
 
-    private readonly Dictionary<StreamTarget, QuicStreamState> _streams = new();
-    private int _syncReadBudget = MaxSyncReads;
+    public QuicTransportStateMachine(
+        IConnectionOperations ops, IActorRef connectionManager, IActorRef self)
+    {
+        _ops = ops;
+        _connectionManager = connectionManager;
+        _self = self;
+        _lifecycle = new QuicStreamLifecycle(ops, self, this, MaxSyncReads);
+    }
 
-    IConnectionOperations IQuicStreamReadHost.Ops => ops;
+    IConnectionOperations IQuicStreamReadHost.Ops => _ops;
 
-    bool IQuicStreamReadHost.TryGetStream(StreamTarget id, [MaybeNullWhen(false)] out QuicStreamState state)
-        => _streams.TryGetValue(id, out state);
+    bool IQuicStreamReadHost.TryGetStream(StreamTarget id, out QuicStreamState state)
+        => _lifecycle.TryGetStream(id, out state);
 
-    void IQuicStreamReadHost.RequestStreamRead(StreamTarget streamId) => RequestStreamRead(streamId);
+    void IQuicStreamReadHost.RequestStreamRead(StreamTarget streamId)
+        => _lifecycle.RequestStreamRead(streamId);
 
     void IQuicStreamReadHost.OnInboundComplete(DisconnectReason reason, long rawStreamId)
-        => OnInboundComplete(reason, rawStreamId);
+        => _lifecycle.OnInboundComplete(reason, rawStreamId);
 
     void IQuicStreamReadHost.OnReadFailure(QuicStreamState state, Exception error)
     {
@@ -47,7 +55,7 @@ public sealed class QuicTransportStateMachine(
         }
         else
         {
-            OnInboundComplete(DisconnectReason.Error, state.StreamId);
+            _lifecycle.OnInboundComplete(DisconnectReason.Error, state.StreamId);
         }
     }
 
@@ -59,7 +67,7 @@ public sealed class QuicTransportStateMachine(
                 OnConnectionLeaseAcquired(e.Lease);
                 break;
             case StreamLeaseAcquired e:
-                OnStreamLeaseAcquired(e.Stream, e.StreamId);
+                _lifecycle.OnStreamLeaseAcquired(e.Stream, e.StreamId);
                 break;
             case AcquisitionFailed e:
                 OnAcquisitionFailed(e.Error);
@@ -71,10 +79,10 @@ public sealed class QuicTransportStateMachine(
                 QuicStreamReads.OnReceiveFailed(this, e.State, e.Error, e.Epoch);
                 break;
             case InboundStreamAccepted e:
-                OnInboundStreamAccepted(e.Stream, e.StreamId);
+                _lifecycle.OnInboundStreamAccepted(e.Stream, e.StreamId, _transportOptions);
                 break;
             case MigrationDetected e:
-                ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
+                _ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
                 break;
         }
     }
@@ -87,20 +95,28 @@ public sealed class QuicTransportStateMachine(
                 HandleConnectTransport(connect);
                 break;
             case OpenStream open:
-                HandleOpenStream(open.StreamId, open.Direction);
+                if (_connectionHandle is not null)
+                {
+                    _lifecycle.HandleOpenStream(open.StreamId, open.Direction, _connectionHandle, _transportOptions);
+                }
+                else
+                {
+                    _ops.OnSignalPullOutbound();
+                }
+
                 break;
             case MultiplexedData data:
-                HandleMultiplexedData(data);
+                _lifecycle.HandleMultiplexedData(data);
                 break;
             case CompleteWrites cw:
-                HandleCompleteWrites(cw.StreamId);
+                _lifecycle.HandleCompleteWrites(cw.StreamId);
                 break;
             case ResetStream rs:
-                HandleResetStream(rs.StreamId, rs.ErrorCode);
+                _lifecycle.HandleResetStream(rs.StreamId, rs.ErrorCode);
                 break;
             case DisconnectTransport:
                 CleanupTransport();
-                ops.OnSignalPullOutbound();
+                _ops.OnSignalPullOutbound();
                 break;
         }
     }
@@ -108,12 +124,8 @@ public sealed class QuicTransportStateMachine(
     public void HandleUpstreamFinish()
     {
         _upstreamFinished = true;
-
-        // Exactly the same teardown as CleanupTransport (accept loop, in-flight acquire, open streams,
-        // connection lease) — previously this branch only stopped the accept loop, leaking every open
-        // stream state and the connection lease back to the pool.
         CleanupTransport();
-        ops.OnCompleteStage();
+        _ops.OnCompleteStage();
     }
 
     public void HandleDownstreamFinish()
@@ -126,7 +138,7 @@ public sealed class QuicTransportStateMachine(
         if (timerKey == MigrationCheckTimerKey)
         {
             CheckForConnectionMigration();
-            ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
+            _ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
             return;
         }
 
@@ -136,16 +148,21 @@ public sealed class QuicTransportStateMachine(
         }
 
         _pendingConnect = null;
-        ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Timeout));
-        ops.OnSignalPullOutbound();
+        _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Timeout));
+        _ops.OnSignalPullOutbound();
     }
 
     public void PostStop()
     {
-        ops.OnCancelTimer(ConnectTimerKey);
-        ops.OnCancelTimer(MigrationCheckTimerKey);
+        _ops.OnCancelTimer(ConnectTimerKey);
+        _ops.OnCancelTimer(MigrationCheckTimerKey);
         CleanupTransport();
     }
+
+    internal void NotifyItemDelivered(StreamTarget streamId) => _lifecycle.NotifyItemDelivered(streamId);
+
+    internal QuicStreamState RegisterTestStream(long streamId, StreamDirection direction)
+        => _lifecycle.RegisterTestStream(streamId, direction, _transportOptions);
 
     private void HandleConnectTransport(ConnectTransport connect)
     {
@@ -164,79 +181,17 @@ public sealed class QuicTransportStateMachine(
         CleanupTransport();
         _pendingConnect = connect;
         AcquireConnection(connect);
-        ops.OnSignalPullOutbound();
-    }
-
-    private void HandleOpenStream(StreamTarget streamId, StreamDirection direction)
-    {
-        if (_connectionHandle is null)
-        {
-            ops.OnSignalPullOutbound();
-            return;
-        }
-
-        var state = QuicStreamState.Rent(direction, _transportOptions);
-        _streams[streamId] = state;
-
-        var sid = streamId.Value;
-        _connectionHandle.OpenStreamAsync(direction)
-            .PipeTo(self,
-                success: result => new StreamLeaseAcquired(result.Stream, sid),
-                failure: ex => new AcquisitionFailed(ex));
-
-        ops.OnSignalPullOutbound();
-    }
-
-    private void HandleMultiplexedData(MultiplexedData data)
-    {
-        if (_streams.TryGetValue(data.StreamId, out var state))
-        {
-            state.Write(data.Buffer);
-        }
-        else
-        {
-            data.Buffer.Dispose();
-        }
-
-        data.Return();
-        ops.OnSignalPullOutbound();
-    }
-
-    private void HandleCompleteWrites(StreamTarget streamId)
-    {
-        if (_streams.TryGetValue(streamId, out var state))
-        {
-            state.CompleteWrites();
-            if (state.Phase == StreamPhase.Closed)
-            {
-                _streams.Remove(streamId);
-                _ = state.DisposeAndReturnAsync();
-            }
-        }
-
-        ops.OnSignalPullOutbound();
-    }
-
-    private void HandleResetStream(StreamTarget streamId, long errorCode)
-    {
-        if (_streams.Remove(streamId, out var state))
-        {
-            state.Abort(errorCode);
-            _ = state.DisposeAndReturnAsync();
-            ops.OnPushInbound(new StreamClosed(streamId, DisconnectReason.Error));
-        }
-
-        ops.OnSignalPullOutbound();
+        _ops.OnSignalPullOutbound();
     }
 
     private void OnConnectionLeaseAcquired(QuicConnectionLease lease)
     {
-        ops.OnCancelTimer(ConnectTimerKey);
+        _ops.OnCancelTimer(ConnectTimerKey);
         _pendingConnect = null;
         _connectionLease = lease;
         _connectionHandle = lease.Handle;
         _lastRemoteEndPoint = _connectionHandle.RemoteEndPoint();
-        ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
+        _ops.OnScheduleTimer(MigrationCheckTimerKey, MigrationCheckInterval);
 
         StartAcceptLoop(_connectionHandle);
         Tracing.For("Connection").Debug(this, "QUIC transport ready");
@@ -250,122 +205,7 @@ public sealed class QuicTransportStateMachine(
             _connectionHandle.LocalEndPoint()!,
             _connectionHandle.RemoteEndPoint()!,
             TransportProtocol.Quic);
-        ops.OnPushInbound(new TransportConnected(info));
-    }
-
-    private void OnStreamLeaseAcquired(Stream stream, long rawStreamId)
-    {
-        var streamId = StreamTarget.FromId(rawStreamId);
-        if (!_streams.TryGetValue(streamId, out var state))
-        {
-            stream.Dispose();
-            return;
-        }
-
-        state.AttachConnection(stream, rawStreamId);
-        if (state.Direction == StreamDirection.Bidirectional)
-        {
-            RequestStreamRead(streamId);
-        }
-
-        ops.OnPushInbound(new StreamOpened(streamId, state.Direction));
-    }
-
-    private void OnInboundStreamAccepted(Stream stream, long rawStreamId)
-    {
-        var streamId = StreamTarget.FromId(rawStreamId);
-        var direction = (rawStreamId & 0x02) != 0
-            ? StreamDirection.Unidirectional
-            : StreamDirection.Bidirectional;
-        var state = QuicStreamState.Rent(direction, _transportOptions);
-        state.AttachConnection(stream, rawStreamId);
-        _streams[streamId] = state;
-
-        ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
-        RequestStreamRead(streamId);
-    }
-
-    internal QuicStreamState RegisterTestStream(long streamId, StreamDirection direction)
-    {
-        var target = StreamTarget.FromId(streamId);
-        var state = QuicStreamState.Rent(direction, _transportOptions);
-        state.ActivateWithoutConnection();
-        state.ActivateDirectReadForTest(streamId);
-        _streams[target] = state;
-        return state;
-    }
-
-    /// <summary>
-    /// Re-arms the read for a stream whose queued item has just been delivered to downstream (called
-    /// from the stage's onPull dequeue site). No-op if the stream's read is already armed or the stream
-    /// is gone — mirrors the identical guard inside <see cref="RequestStreamRead"/>.
-    /// </summary>
-    internal void NotifyItemDelivered(StreamTarget streamId) => RequestStreamRead(streamId);
-
-    private void RequestStreamRead(StreamTarget streamId)
-    {
-        if (!_streams.TryGetValue(streamId, out var state) || !state.IsAttached)
-        {
-            return;
-        }
-
-        // At most ONE in-flight read per stream: a no-op if a read is already armed for it.
-        if (state.ReadArmed)
-        {
-            return;
-        }
-
-        // Peer already closed the read side of the QuicStream — nothing more will arrive.
-        if (state.QuicStream is { ReadsClosed.IsCompleted: true })
-        {
-            OnInboundComplete(DisconnectReason.Graceful, streamId.Value);
-            return;
-        }
-
-        state.ReadArmed = true;
-
-        var readTask = state.ReceiveAsync();
-
-        if (readTask.IsCompletedSuccessfully && _syncReadBudget > 0)
-        {
-            // Sync fast-path: this completes on the actor thread within the SAME rent, so the state's
-            // current Epoch is exactly the epoch this read would carry — the guard inside
-            // OnReceiveCompleted is a no-op here, it can never be stale.
-            _syncReadBudget--;
-            QuicStreamReads.OnReceiveCompleted(this, state, readTask.Result, state.Epoch);
-            return;
-        }
-
-        _syncReadBudget = MaxSyncReads;
-        readTask.PipeTo(self, success: state.ReadSuccess, failure: state.ReadFailure);
-    }
-
-    private void OnInboundComplete(DisconnectReason reason, long rawStreamId)
-    {
-        var streamId = StreamTarget.FromId(rawStreamId);
-        if (!_streams.TryGetValue(streamId, out var state))
-        {
-            return;
-        }
-
-        if (reason == DisconnectReason.Graceful)
-        {
-            state.OnReadCompleted();
-
-            if (state.Phase == StreamPhase.Closed)
-            {
-                _streams.Remove(streamId);
-                _ = state.DisposeAndReturnAsync();
-            }
-
-            ops.OnPushInbound(new StreamReadCompleted(streamId));
-        }
-        else
-        {
-            _streams.Remove(streamId);
-            _ = state.DisposeAndReturnAsync();
-            ops.OnPushInbound(new StreamClosed(streamId, reason));
-        }
+        _ops.OnPushInbound(new TransportConnected(info));
     }
 
     private void OnAcquisitionFailed(Exception ex)
@@ -375,14 +215,14 @@ public sealed class QuicTransportStateMachine(
             return;
         }
 
-        ops.OnCancelTimer(ConnectTimerKey);
+        _ops.OnCancelTimer(ConnectTimerKey);
         Tracing.For("Connection").Warning(this, "QUIC acquisition failed: {0}", ex.Message);
 
         if (_pendingConnect is not null)
         {
             _pendingConnect = null;
-            ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
-            ops.OnSignalPullOutbound();
+            _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Error));
+            _ops.OnSignalPullOutbound();
             return;
         }
 
@@ -395,32 +235,19 @@ public sealed class QuicTransportStateMachine(
 
         if (_autoReconnect && !_upstreamFinished)
         {
-            foreach (var (_, state) in _streams)
-            {
-                _ = state.DisposeAndReturnAsync();
-            }
-
-            _streams.Clear();
-
-            ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Transient));
+            _lifecycle.DisposeAllStreams();
+            _ops.OnPushInbound(new TransportDisconnected(DisconnectReason.Transient));
             _isReconnecting = true;
             StopAcceptLoop();
             ReturnConnectionToPool(false);
             _connectionHandle = null;
             _connectionLease = null;
-            ops.OnSignalPullOutbound();
+            _ops.OnSignalPullOutbound();
             return;
         }
 
-        foreach (var (target, state) in _streams)
-        {
-            ops.OnPushInbound(new StreamClosed(target, reason));
-            _ = state.DisposeAndReturnAsync();
-        }
-
-        _streams.Clear();
-
-        ops.OnPushInbound(new TransportDisconnected(reason));
+        _lifecycle.DisposeAllStreamsWithNotification(reason);
+        _ops.OnPushInbound(new TransportDisconnected(reason));
         StopAcceptLoop();
         ReturnConnectionToPool(false);
         _connectionHandle = null;
@@ -428,11 +255,11 @@ public sealed class QuicTransportStateMachine(
 
         if (_upstreamFinished)
         {
-            ops.OnCompleteStage();
+            _ops.OnCompleteStage();
         }
         else
         {
-            ops.OnSignalPullOutbound();
+            _ops.OnSignalPullOutbound();
         }
     }
 
@@ -441,7 +268,7 @@ public sealed class QuicTransportStateMachine(
         if (ConnectionMigrationCheck.TryDetect(
                 _connectionHandle?.RemoteEndPoint(), ref _lastRemoteEndPoint, out var old, out var current))
         {
-            ops.OnPushInbound(new ConnectionMigrationDetected(old, current));
+            _ops.OnPushInbound(new ConnectionMigrationDetected(old, current));
         }
     }
 
@@ -453,8 +280,8 @@ public sealed class QuicTransportStateMachine(
 
         if (connect.Options is QuicTransportOptions quicOpts)
         {
-            QuicConnectionManagerActor.AcquireAsync(connectionManager, quicOpts, _acquireCts.Token)
-                .PipeTo(self,
+            QuicConnectionManagerActor.AcquireAsync(_connectionManager, quicOpts, _acquireCts.Token)
+                .PipeTo(_self,
                     success: lease => new ConnectionLeaseAcquired(lease),
                     failure: ex => new AcquisitionFailed(ex));
         }
@@ -465,7 +292,7 @@ public sealed class QuicTransportStateMachine(
             timeout = TimeSpan.FromSeconds(10);
         }
 
-        ops.OnScheduleTimer(ConnectTimerKey, timeout);
+        _ops.OnScheduleTimer(ConnectTimerKey, timeout);
     }
 
     private void StartAcceptLoop(QuicConnectionHandle connectionHandle)
@@ -473,7 +300,7 @@ public sealed class QuicTransportStateMachine(
         _acceptCts?.Cancel();
         _acceptCts?.Dispose();
         _acceptCts = new CancellationTokenSource();
-        _ = AcceptLoopAsync(connectionHandle, self, _acceptCts.Token);
+        _ = AcceptLoopAsync(connectionHandle, _self, _acceptCts.Token);
     }
 
     private void StopAcceptLoop()
@@ -502,11 +329,6 @@ public sealed class QuicTransportStateMachine(
 
             if (result is null)
             {
-                // A null result here (the cancellation case is handled above) means
-                // AcceptInboundStreamAsync threw — for QUIC that only happens when the connection is
-                // aborted/idle/closed, which is terminal. Stop the loop instead of busy-spinning
-                // (re-throwing a QuicException every iteration with no backoff); the connection failure
-                // is surfaced by the stream read pumps and the pool's liveness check.
                 return;
             }
 
@@ -524,7 +346,7 @@ public sealed class QuicTransportStateMachine(
         var lease = _connectionLease;
         _connectionLease = null;
 
-        connectionManager.Tell(new QuicConnectionManagerActor.Release(lease, canReuse));
+        _connectionManager.Tell(new QuicConnectionManagerActor.Release(lease, canReuse));
 
         if (!canReuse)
         {
@@ -540,12 +362,7 @@ public sealed class QuicTransportStateMachine(
         _acquireCts?.Dispose();
         _acquireCts = null;
 
-        foreach (var (_, state) in _streams)
-        {
-            _ = state.DisposeAndReturnAsync();
-        }
-
-        _streams.Clear();
+        _lifecycle.DisposeAllStreams();
 
         ReturnConnectionToPool(false);
         _connectionHandle = null;

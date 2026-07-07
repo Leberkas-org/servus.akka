@@ -88,7 +88,8 @@ internal sealed class QuicClientProvider(QuicTransportOptions options) : IAsyncD
 
     public async ValueTask DisposeAsync()
     {
-        var connection = Interlocked.Exchange(ref _connection, null);
+        var connection = _connection;
+        _connection = null;
         if (connection is not null)
         {
             await connection.DisposeAsync().ConfigureAwait(false);

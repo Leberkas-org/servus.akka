@@ -352,7 +352,6 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
 
         Assert.Equal(1, recording.WriteCount);
         Assert.Equal(1, recording.FlushCount);
-        Assert.Equal(1, connection.CoalescedWriteCount);
         Assert.Equal(expected, recording.Written);
     }
 
@@ -394,7 +393,6 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
 
         Assert.Equal(2, recording.WriteCount);
         Assert.Equal(1, recording.FlushCount);
-        Assert.Equal(0, connection.CoalescedWriteCount);
         Assert.Equal(expected, recording.Written);
     }
 

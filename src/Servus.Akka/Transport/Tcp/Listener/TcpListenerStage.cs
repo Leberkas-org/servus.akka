@@ -181,19 +181,31 @@ internal sealed class TcpListenerStage
             var localEndPoint = client.Client.LocalEndPoint!;
             var remoteEndPoint = client.Client.RemoteEndPoint!;
 
+            var security = tlsResult.Security;
+            if (tlsResult.SslStream is not null || tlsResult.AllowDelayedNegotiation)
+            {
+                security = security is not null
+                    ? security with
+                    {
+                        SslStream = tlsResult.SslStream,
+                        AllowDelayedNegotiation = tlsResult.AllowDelayedNegotiation
+                    }
+                    : new SecurityInfo(default, default, SslStream: tlsResult.SslStream,
+                        AllowDelayedNegotiation: tlsResult.AllowDelayedNegotiation);
+            }
+
             var connectionInfo = new ConnectionInfo(
                 localEndPoint,
                 remoteEndPoint,
-                tlsResult.Security is not null ? TransportProtocol.Tls : TransportProtocol.Tcp,
-                tlsResult.Security);
+                security is not null ? TransportProtocol.Tls : TransportProtocol.Tcp,
+                security);
+
+            IDuplexConnection connection = tlsResult.SslStream is null
+                ? new RawSocketConnection(client.Client, _connectionOptions)
+                : new StreamConnection(tlsResult.Stream, _connectionOptions);
 
             var connectionStage = new TcpServerConnectionStage(
-                        tlsResult.Stream,
-                        connectionInfo,
-                        tlsResult.SslStream,
-                        tlsResult.AllowDelayedNegotiation,
-                        _connectionOptions,
-                        tlsResult.SslStream is null ? client.Client : null);
+                connection, connectionInfo, _connectionOptions);
 
             var connectionFlow = Flow.FromGraph(connectionStage);
 

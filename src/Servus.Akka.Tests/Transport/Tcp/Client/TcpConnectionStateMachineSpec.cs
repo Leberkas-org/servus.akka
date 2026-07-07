@@ -754,8 +754,9 @@ public sealed class TcpConnectionStateMachineSpec
         var lease = CreateTestLease(out _);
         sm.Dispatch(new LeaseAcquired(lease)); // gen 1, RequestRead issues async read #1
 
-        var success1 = sm.ReadState.ReadSuccess;
-        var failure1 = sm.ReadState.ReadFailure;
+        var readState1 = GetReadState(sm);
+        var success1 = readState1.ReadSuccess;
+        var failure1 = readState1.ReadFailure;
 
         // Complete read #1 in the current gen so a second read can be issued.
         var buffer = CreateTestBuffer(1);
@@ -764,8 +765,17 @@ public sealed class TcpConnectionStateMachineSpec
 
         sm.RequestRead(); // async read #2, same generation
 
-        Assert.Same(success1, sm.ReadState.ReadSuccess);
-        Assert.Same(failure1, sm.ReadState.ReadFailure);
+        var readState2 = GetReadState(sm);
+        Assert.Same(success1, readState2.ReadSuccess);
+        Assert.Same(failure1, readState2.ReadFailure);
+    }
+
+    private static ReadEventState GetReadState(TcpConnectionStateMachine sm)
+    {
+        var field = typeof(TcpConnectionStateMachine).GetField(
+            "_readState",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (ReadEventState)field.GetValue(sm)!;
     }
 
     private static bool GetReadInProgress(TcpConnectionStateMachine sm)

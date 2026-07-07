@@ -11,6 +11,8 @@ internal sealed record TransportConnectionOptions
     public int ReceiveBufferHint { get; init; } = 64 * 1024;
     public long OutputHighWatermark { get; init; } = 64 * 1024;
     public long OutputLowWatermark { get; init; } = 32 * 1024;
+    public int MaxSyncReads { get; init; } = 8;
+    public int? MaxBytesPerSend { get; init; }
 
     internal static TransportConnectionOptions FromListener(ListenerOptions listener) => new()
     {

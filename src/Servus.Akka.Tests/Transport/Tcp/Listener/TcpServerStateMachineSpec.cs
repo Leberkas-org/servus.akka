@@ -15,19 +15,17 @@ public sealed class TcpServerStateMachineSpec
         new IPEndPoint(IPAddress.Loopback, 12345),
         TransportProtocol.Tcp);
 
-    private static (TcpServerStateMachine Sm, MockConnectionOperations Ops) CreateStateMachine(Stream? stream = null)
+    private static readonly TransportConnectionOptions DefaultOptions = new();
+
+    private static (TcpServerStateMachine Sm, MockConnectionOperations Ops) CreateStateMachine(
+        IDuplexConnection? connection = null)
     {
         var ops = new MockConnectionOperations();
-        var sm = new TcpServerStateMachine(ops, ActorRefs.Nobody, stream ?? Stream.Null, TestConnectionInfo);
+        var sm = new TcpServerStateMachine(
+            ops, ActorRefs.Nobody, connection ?? new FakeDuplexConnection(), TestConnectionInfo, DefaultOptions);
         return (sm, ops);
     }
 
-    /// <summary>
-    /// Injects a <see cref="FakeDuplexConnection"/> via the SM's test-only <c>connectionFactory</c> seam
-    /// so watermark/enqueue/flush behavior can be observed deterministically — a real
-    /// <see cref="StreamConnection"/> over <see cref="Stream.Null"/> completes reads/writes
-    /// asynchronously on background tasks and cannot be raced against synchronously in a unit test.
-    /// </summary>
     // Explicit 512K/256K watermarks: the tests below assert pause/resume behavior at those exact
     // boundaries, independent of TransportConnectionOptions' Kestrel-aligned 64K/32K defaults.
     private static readonly TransportConnectionOptions TestWatermarkOptions = new()
@@ -42,9 +40,7 @@ public sealed class TcpServerStateMachineSpec
         var ops = new MockConnectionOperations();
         var connection = new FakeDuplexConnection();
         var sm = new TcpServerStateMachine(
-            ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
-            connectionOptions: TestWatermarkOptions,
-            connectionFactory: () => connection);
+            ops, ActorRefs.Nobody, connection, TestConnectionInfo, TestWatermarkOptions);
         sm.Start();
         return (sm, ops, connection);
     }
@@ -70,11 +66,15 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Start_should_include_tls_info_when_allow_delayed_negotiation()
+    public void Start_should_include_tls_info_when_connection_info_has_security()
     {
         var ops = new MockConnectionOperations();
-        var sm = new TcpServerStateMachine(ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
-            allowDelayedNegotiation: true);
+        var infoWithSecurity = TestConnectionInfo with
+        {
+            Security = new SecurityInfo(default, default, AllowDelayedNegotiation: true)
+        };
+        var sm = new TcpServerStateMachine(
+            ops, ActorRefs.Nobody, new FakeDuplexConnection(), infoWithSecurity, DefaultOptions);
 
         sm.Start();
 
@@ -404,8 +404,9 @@ public sealed class TcpServerStateMachineSpec
         var (sm, ops, _) = CreateStateMachineWithFakeConnection();
         sm.RequestRead(); // async read #1 parks on the fake connection
 
-        var success1 = sm.ReadState.ReadSuccess;
-        var failure1 = sm.ReadState.ReadFailure;
+        var readState1 = GetReadState(sm);
+        var success1 = readState1.ReadSuccess;
+        var failure1 = readState1.ReadFailure;
 
         // Complete read #1 in the current gen so a second read can be issued.
         var buffer = CreateTestBuffer(1);
@@ -414,8 +415,9 @@ public sealed class TcpServerStateMachineSpec
 
         sm.RequestRead(); // async read #2, same generation
 
-        Assert.Same(success1, sm.ReadState.ReadSuccess);
-        Assert.Same(failure1, sm.ReadState.ReadFailure);
+        var readState2 = GetReadState(sm);
+        Assert.Same(success1, readState2.ReadSuccess);
+        Assert.Same(failure1, readState2.ReadFailure);
     }
 
     // The fake connection's ReceiveAsync() returns a TCS-backed ValueTask that never completes,
@@ -451,6 +453,14 @@ public sealed class TcpServerStateMachineSpec
         Assert.True(GetReadInProgress(sm));
         Assert.Empty(ops.PushedInbound);
         Assert.Equal(pullBefore, ops.PullOutboundCount);
+    }
+
+    private static ReadEventState GetReadState(TcpServerStateMachine sm)
+    {
+        var field = typeof(TcpServerStateMachine).GetField(
+            "_readState",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (ReadEventState)field.GetValue(sm)!;
     }
 
     private static bool GetReadInProgress(TcpServerStateMachine sm)
