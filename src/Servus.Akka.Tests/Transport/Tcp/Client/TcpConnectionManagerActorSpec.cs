@@ -107,6 +107,43 @@ public sealed class TcpConnectionManagerActorSpec : TestKit
     }
 
     [Fact(Timeout = 5000)]
+    public async Task AcquireAsync_should_reject_idle_expired_lease_and_establish_fresh_connection()
+    {
+        var clock = new FakeTimeProvider();
+        var factory = new InMemoryTcpConnectionFactory(clock);
+        var config = new TcpPoolConfig(
+            MaxConnectionsPerHost: 6,
+            IdleTimeout: TimeSpan.FromSeconds(5),
+            ConnectionLifetime: Timeout.InfiniteTimeSpan,
+            ReuseOnUpstreamFinish: true);
+        var actor = Sys.ActorOf(TransportFactory.CreateTcpConnectionManager(factory, new PoolConfigRegistry(config)));
+        var options = CreateOptions();
+
+        var lease1 = await TcpConnectionManagerActor.AcquireAsync(actor, options, TestContext.Current.CancellationToken);
+        actor.Tell(new TcpConnectionManagerActor.Release(lease1, CanReuse: true));
+
+        // Give the actor's mailbox a chance to fully process Release (which stamps the lease's
+        // idle-since timestamp off the fake clock) before advancing the clock — otherwise the
+        // Advance below can race ahead of that stamp and land on an already-advanced clock, making
+        // the freshly-idled lease appear to have zero elapsed idle time. Mirrors the same real-delay
+        // pattern used by EvictIdle_should_remove_expired_connections below.
+        await Task.Delay(50, TestContext.Current.CancellationToken);
+
+        // Lifetime is infinite, so only crossing the idle-timeout should trigger eviction here.
+        // Deliberately do NOT send Evict.Instance — this exercises the acquire-path guard in
+        // OnAcquire directly, not the periodic eviction sweep.
+        clock.Advance(TimeSpan.FromSeconds(10));
+
+        var lease2 = await TcpConnectionManagerActor.AcquireAsync(actor, options, TestContext.Current.CancellationToken);
+
+        Assert.NotSame(lease1, lease2);
+        Assert.False(lease1.IsAlive());
+        Assert.True(lease2.IsAlive());
+
+        lease2.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task Acquire_should_reuse_idle_connection_when_strategy_allows()
     {
         var actor = CreateActor();

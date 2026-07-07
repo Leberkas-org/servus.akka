@@ -270,6 +270,27 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task DisposeAsync_immediately_after_create_should_not_throw()
+    {
+        // StreamConnection's send loop is started via Task.Run without passing the
+        // CancellationToken to Task.Run itself (see the comment above _sendLoop's assignment) —
+        // disposing immediately after construction exercises the scheduling window where the
+        // loop hasn't started running yet when cancellation/teardown fires.
+        for (var i = 0; i < 20; i++)
+        {
+            using var clientSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            var endpoint = (IPEndPoint)_listener.LocalEndPoint!;
+            await clientSocket.ConnectAsync(endpoint, TestContext.Current.CancellationToken);
+            using var serverSocket = await _listener.AcceptAsync(TestContext.Current.CancellationToken);
+            await using var serverStream = new NetworkStream(serverSocket, ownsSocket: false);
+            var clientStream = new NetworkStream(clientSocket, ownsSocket: false);
+
+            var connection = new StreamConnection(clientStream, new TransportConnectionOptions());
+            await connection.DisposeAsync();
+        }
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task TryEnqueue_after_CompleteAndDrainOutput_should_return_false_and_leave_ownership()
     {
         var connection = new StreamConnection(_clientStream, new TransportConnectionOptions());

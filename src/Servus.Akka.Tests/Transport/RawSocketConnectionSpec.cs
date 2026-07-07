@@ -360,6 +360,25 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task DisposeAsync_immediately_after_create_should_not_throw()
+    {
+        // RawSocketConnection's send loop is started via Task.Run without passing the
+        // CancellationToken to Task.Run itself (see the comment above _sendLoop's assignment) —
+        // disposing immediately after construction exercises the scheduling window where the
+        // loop hasn't started running yet when cancellation/teardown fires.
+        for (var i = 0; i < 20; i++)
+        {
+            using var client = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+            var endpoint = (IPEndPoint)_listener.LocalEndPoint!;
+            await client.ConnectAsync(endpoint, TestContext.Current.CancellationToken);
+            using var server = await _listener.AcceptAsync(TestContext.Current.CancellationToken);
+
+            var connection = new RawSocketConnection(client, new TransportConnectionOptions());
+            await connection.DisposeAsync();
+        }
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task TryEnqueue_after_CompleteAndDrainOutput_should_return_false_and_leave_ownership()
     {
         var connection = new RawSocketConnection(_client, new TransportConnectionOptions());
