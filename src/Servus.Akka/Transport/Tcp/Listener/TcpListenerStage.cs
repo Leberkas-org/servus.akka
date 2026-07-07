@@ -202,7 +202,7 @@ internal sealed class TcpListenerStage
 
             IDuplexConnection connection = tlsResult.SslStream is null
                 ? new RawSocketConnection(client.Client, _connectionOptions)
-                : new StreamConnection(tlsResult.Stream, _connectionOptions);
+                : new StreamConnection(tlsResult.Stream, _connectionOptions, useZeroByteProbe: true);
 
             var connectionStage = new TcpServerConnectionStage(
                 connection, connectionInfo, _connectionOptions);

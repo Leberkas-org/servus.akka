@@ -56,7 +56,7 @@ internal sealed class TcpConnectionFactory : ITcpConnectionFactory
 
         IDuplexConnection connection = plaintextSocket is not null
             ? new RawSocketConnection(plaintextSocket, connectionOptions)
-            : new StreamConnection(stream, connectionOptions);
+            : new StreamConnection(stream, connectionOptions, useZeroByteProbe: true);
         var cts = new CancellationTokenSource();
         var lease = new ConnectionLease(connection, cts, info, options: connectionOptions);
 

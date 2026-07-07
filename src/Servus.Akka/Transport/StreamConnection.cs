@@ -3,10 +3,12 @@ using System.Net.Quic;
 namespace Servus.Akka.Transport;
 
 /// <summary>
-/// Stream-shaped duplex connection (TLS <c>SslStream</c>, <c>QuicStream</c>, and test streams). Unlike
-/// <see cref="RawSocketConnection"/> there is NO zero-byte probe — the inbound side rents a
-/// <see cref="WireBuffer"/> at the current hint and awaits <c>Stream.ReadAsync</c> directly, meaning a
-/// buffer IS pinned while a receive is parked. Outbound coalesces a batch of small buffers into one
+/// Stream-shaped duplex connection (TLS <c>SslStream</c>, <c>QuicStream</c>, and test streams). When
+/// <c>useZeroByteProbe</c> is enabled (TLS only — QUIC and plain test streams don't support it), the
+/// inbound side does a zero-byte <c>SslStream.ReadAsync</c> first as the cancellation point, then rents
+/// a <see cref="WireBuffer"/> at the current hint only once data is known to be available, matching
+/// <see cref="RawSocketConnection"/>'s idle-memory behavior. Without the probe, a buffer IS pinned while
+/// a receive is parked. Outbound coalesces a batch of small buffers into one
 /// write, otherwise writes each buffer sequentially — one flush per batch. When <c>quicAware</c> is set,
 /// a graceful/aborted <see cref="QuicException"/> on read maps to EOF and the send loop skips writes once
 /// the peer has closed the write side (STOP_SENDING).
@@ -15,13 +17,16 @@ internal sealed class StreamConnection : DuplexConnectionBase
 {
     private readonly Stream _stream;
     private readonly bool _quicAware;
+    private readonly bool _useZeroByteProbe;
     private readonly int _coalesceThreshold;
 
-    public StreamConnection(Stream stream, TransportConnectionOptions options, bool quicAware = false)
+    public StreamConnection(Stream stream, TransportConnectionOptions options,
+        bool quicAware = false, bool useZeroByteProbe = false)
         : base(options.ReceiveBufferHint)
     {
         _stream = stream;
         _quicAware = quicAware;
+        _useZeroByteProbe = useZeroByteProbe && !quicAware;
         _coalesceThreshold = quicAware ? 4 * 1024 : options.CoalesceThreshold;
     }
 
@@ -34,12 +39,20 @@ internal sealed class StreamConnection : DuplexConnectionBase
 
     protected override async ValueTask<WireBuffer?> ReceiveDataAsync(CancellationToken ct)
     {
-        // No zero-byte probe: rent at the hint and read directly. The rented buffer IS pinned while
-        // the read is parked, so a quiesce that cancels this read disposes it below (clean park).
+        if (_useZeroByteProbe)
+        {
+            // Zero-byte read is the cancellation point (like RawSocketConnection) — no buffer is
+            // pinned while idle. The data is known to be available by the time it returns, so the
+            // actual read below uses CancellationToken.None.
+            await _stream.ReadAsync(Memory<byte>.Empty, ct);
+        }
+
         var buffer = WireBuffer.Rent(ReceiveHint);
         try
         {
-            var bytesRead = await _stream.ReadAsync(buffer.FullMemory, ct);
+            var bytesRead = _useZeroByteProbe
+                ? await _stream.ReadAsync(buffer.FullMemory, CancellationToken.None)
+                : await _stream.ReadAsync(buffer.FullMemory, ct);
             if (bytesRead == 0)
             {
                 buffer.Dispose();
