@@ -87,7 +87,9 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
         while (host.Idle.TryPop(out var idle))
         {
-            if (idle.IsAlive() && !idle.IsExpired(host.Config.ConnectionLifetime))
+            if (idle.IsAlive()
+                && !idle.IsExpired(host.Config.ConnectionLifetime)
+                && !idle.IsIdleExpired(host.Config.IdleTimeout))
             {
                 if (msg.Tcs.TrySetResult(idle))
                 {
@@ -192,6 +194,7 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
             }
         }
 
+        lease.MarkIdle();
         host.Idle.Push(lease);
     }
 
@@ -254,7 +257,9 @@ public sealed class TcpConnectionManagerActor : ReceiveActor, IWithTimers
 
             while (host.Idle.TryPop(out var lease))
             {
-                if (!lease.IsAlive() || lease.IsExpired(host.Config.ConnectionLifetime))
+                if (!lease.IsAlive()
+                    || lease.IsExpired(host.Config.ConnectionLifetime)
+                    || lease.IsIdleExpired(host.Config.IdleTimeout))
                 {
                     toRemove.Add(lease);
                 }
