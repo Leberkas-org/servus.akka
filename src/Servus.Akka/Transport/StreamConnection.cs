@@ -27,7 +27,7 @@ internal sealed class StreamConnection : DuplexConnectionBase
         _stream = stream;
         _quicAware = quicAware;
         _useZeroByteProbe = useZeroByteProbe && !quicAware;
-        _coalesceThreshold = quicAware ? 4 * 1024 : options.CoalesceThreshold;
+        _coalesceThreshold = options.CoalesceThreshold;
     }
 
     internal StreamConnection(Stream stream, TransportConnectionOptions options, Task? sendLoopStartGate)

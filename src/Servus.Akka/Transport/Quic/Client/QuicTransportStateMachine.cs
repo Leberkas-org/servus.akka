@@ -171,7 +171,7 @@ internal sealed class QuicTransportStateMachine : IQuicStreamReadHost
             _autoReconnect = quicOpts.AutoReconnect;
         }
 
-        _transportOptions = TransportConnectionOptions.FromTransport(connect.Options);
+        _transportOptions = TransportConnectionOptions.FromQuicTransport(connect.Options);
 
         if (_connectionLease is not null)
         {

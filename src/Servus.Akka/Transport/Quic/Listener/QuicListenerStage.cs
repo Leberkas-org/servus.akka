@@ -55,7 +55,7 @@ internal sealed class QuicListenerStage
         {
             _stage = stage;
             _boundSignal = boundSignal;
-            _connectionOptions = TransportConnectionOptions.FromListener(stage._options);
+            _connectionOptions = TransportConnectionOptions.FromQuicListener(stage._options);
 
             SetHandler(stage._out, onPull: () => TryPush());
         }

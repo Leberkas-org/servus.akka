@@ -28,4 +28,20 @@ internal sealed record TransportConnectionOptions
         OutputHighWatermark = transport.OutputPauseThreshold,
         OutputLowWatermark = transport.OutputResumeThreshold,
     };
+
+    internal static TransportConnectionOptions FromQuicTransport(TransportOptions transport) => new()
+    {
+        ReceiveBufferHint = transport.ReceiveBufferHint,
+        OutputHighWatermark = transport.OutputPauseThreshold,
+        OutputLowWatermark = transport.OutputResumeThreshold,
+        CoalesceThreshold = 4 * 1024,
+    };
+
+    internal static TransportConnectionOptions FromQuicListener(ListenerOptions listener) => new()
+    {
+        ReceiveBufferHint = listener.ReceiveBufferHint,
+        OutputHighWatermark = listener.OutputPauseThreshold,
+        OutputLowWatermark = listener.OutputResumeThreshold,
+        CoalesceThreshold = 4 * 1024,
+    };
 }
