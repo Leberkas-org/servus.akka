@@ -8,6 +8,6 @@ public abstract record ListenerOptions
     public int? SocketSendBufferSize { get; init; }
     public int? SocketReceiveBufferSize { get; init; }
     public int ReceiveBufferHint { get; init; } = 64 * 1024;
-    public long OutputPauseThreshold { get; init; } = 64 * 1024;
-    public long OutputResumeThreshold { get; init; } = 32 * 1024;
+    public long OutputPauseThreshold { get; init; } = 256 * 1024;
+    public long OutputResumeThreshold { get; init; } = 128 * 1024;
 }

@@ -9,7 +9,7 @@ internal static class AdaptiveHint
 {
     public const int MinHint = 4 * 1024;
     public const int MaxHint = 128 * 1024;
-    private const int ShrinkStreakThreshold = 2;
+    private const int ShrinkStreakThreshold = 4;
 
     public static void Adapt(int bytesRead, ref int hint, ref int shrinkStreak)
     {

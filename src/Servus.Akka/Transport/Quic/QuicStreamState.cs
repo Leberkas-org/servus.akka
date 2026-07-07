@@ -46,7 +46,8 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// </summary>
     public int Epoch { get; private set; }
 
-    private ReadTransforms _transforms = null!;
+    private Func<WireBuffer?, IQuicTransportEvent> _readSuccess = null!;
+    private Func<Exception, IQuicTransportEvent> _readFailure = null!;
 
     /// <summary>
     /// Cached PipeTo transforms — pure wrappers that capture only <c>(this, Epoch)</c> and package the raw
@@ -58,25 +59,11 @@ internal sealed class QuicStreamState : IAsyncDisposable
     /// per-read allocation. Buffer ownership during an in-flight read lives inside
     /// <see cref="StreamConnection"/>, so there is no per-state pending-buffer bookkeeping here.
     /// </summary>
-    internal Func<WireBuffer?, IQuicTransportEvent> ReadSuccess => _transforms.ReadSuccess;
-    internal Func<Exception, IQuicTransportEvent> ReadFailure => _transforms.ReadFailure;
+    internal Func<WireBuffer?, IQuicTransportEvent> ReadSuccess => _readSuccess;
+    internal Func<Exception, IQuicTransportEvent> ReadFailure => _readFailure;
 
     private QuicStreamState()
     {
-    }
-
-    /// <summary>
-    /// Per-epoch transform holder: the delegates capture <c>(state, epoch)</c> immutably, so
-    /// <c>PipeTo</c> allocates nothing per read while the epoch stamped on every produced event follows
-    /// the rent generation. Refreshed once per rent — exactly like <see cref="Tcp.ReadEventState"/>.
-    /// </summary>
-    private sealed class ReadTransforms(QuicStreamState state, int epoch)
-    {
-        public readonly Func<WireBuffer?, IQuicTransportEvent> ReadSuccess =
-            buffer => new StreamReceiveCompleted(state, buffer, epoch);
-
-        public readonly Func<Exception, IQuicTransportEvent> ReadFailure =
-            ex => new StreamReceiveFailed(state, ex, epoch);
     }
 
     /// <summary>
@@ -106,7 +93,9 @@ internal sealed class QuicStreamState : IAsyncDisposable
         // only in ResetAfterDispose) covers both a fresh instance and a repooled one uniformly, so an
         // in-flight event captured under the previous rent is always detectable as stale.
         state.Epoch++;
-        state._transforms = new ReadTransforms(state, state.Epoch);
+        var epoch = state.Epoch;
+        state._readSuccess = buffer => new StreamReceiveCompleted(state, buffer, epoch);
+        state._readFailure = ex => new StreamReceiveFailed(state, ex, epoch);
         return state;
     }
 
