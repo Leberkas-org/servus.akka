@@ -108,13 +108,11 @@ public sealed class QuicTransportStateMachine(
     public void HandleUpstreamFinish()
     {
         _upstreamFinished = true;
-        if (_connectionHandle is null)
-        {
-            ops.OnCompleteStage();
-            return;
-        }
 
-        StopAcceptLoop();
+        // Exactly the same teardown as CleanupTransport (accept loop, in-flight acquire, open streams,
+        // connection lease) — previously this branch only stopped the accept loop, leaking every open
+        // stream state and the connection lease back to the pool.
+        CleanupTransport();
         ops.OnCompleteStage();
     }
 

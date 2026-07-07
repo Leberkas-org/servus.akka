@@ -530,6 +530,56 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public async Task HandleUpstreamFinish_should_dispose_open_streams_and_release_the_lease()
+    {
+        var ops = new StubOps();
+        var sm = new QuicTransportStateMachine(ops, ActorRefs.Nobody, ActorRefs.Nobody);
+        var options = new QuicTransportOptions { Host = "localhost", Port = 443 };
+        sm.HandlePush(new ConnectTransport(options));
+
+        var leaseDisposed = false;
+        var handle = new QuicConnectionHandle(
+            openStream: async (_, ct) =>
+            {
+                await Task.Delay(0, ct).ConfigureAwait(false);
+                return (new MemoryStream(), 1L);
+            },
+            acceptInboundStream: async ct =>
+            {
+                await Task.Delay(Timeout.Infinite, ct).ConfigureAwait(false);
+                return null;
+            },
+            getLocalEndPoint: () => new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 12345),
+            getRemoteEndPoint: () => null,
+            dispose: () =>
+            {
+                leaseDisposed = true;
+                return ValueTask.CompletedTask;
+            });
+
+        var lease = new QuicConnectionLease(handle, 100);
+        sm.Dispatch(new ConnectionLeaseAcquired(lease));
+
+        const long streamId = 1L;
+        sm.HandlePush(new OpenStream(streamId, StreamDirection.Bidirectional));
+        var trackingStream = new TrackingStream();
+        sm.Dispatch(new StreamLeaseAcquired(trackingStream, streamId));
+
+        sm.HandleUpstreamFinish();
+
+        // Teardown of the underlying stream/lease is fire-and-forget (async QuiesceAsync/DisposeAsync
+        // chains) — poll briefly rather than asserting synchronously.
+        var deadline = DateTime.UtcNow.AddSeconds(2);
+        while (!(trackingStream.Disposed && leaseDisposed) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(trackingStream.Disposed, "the open stream's underlying connection must be disposed");
+        Assert.True(leaseDisposed, "the connection lease must be released back to the pool");
+    }
+
+    [Fact(Timeout = 5000)]
     public void HandleConnectTransport_with_existing_lease_should_set_reconnecting()
     {
         var (ops, sm) = CreateConnectedStateMachine();
@@ -887,5 +937,33 @@ public sealed class QuicTransportStateMachineSpec
         public Memory<byte> Memory => _array;
 
         public void Dispose() => Disposed = true;
+    }
+
+    // A never-completing readable stream so the attached stream's connection stays "live" until the
+    // teardown path explicitly disposes it — mirrors QuicStreamDisposalSpec.TrackingStream.
+    private sealed class TrackingStream : MemoryStream
+    {
+        public bool Disposed { get; private set; }
+
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            var tcs = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+            await using (cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken)))
+            {
+                return await tcs.Task.ConfigureAwait(false);
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            Disposed = true;
+            base.Dispose(disposing);
+        }
+
+        public override async ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            await base.DisposeAsync();
+        }
     }
 }
