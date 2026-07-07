@@ -28,6 +28,14 @@ public sealed class TcpConnectionStateMachineSpec
         return (sm, ops);
     }
 
+    // Explicit 512K/256K watermarks: the tests below assert pause/resume behavior at those exact
+    // boundaries, independent of TransportConnectionOptions' Kestrel-aligned 64K/32K defaults.
+    private static readonly TransportConnectionOptions TestWatermarkOptions = new()
+    {
+        OutputHighWatermark = 512 * 1024,
+        OutputLowWatermark = 256 * 1024
+    };
+
     private static ConnectionLease CreateTestLease()
         => CreateTestLease(out _);
 
@@ -35,7 +43,7 @@ public sealed class TcpConnectionStateMachineSpec
     {
         connection = new FakeDuplexConnection();
         var cts = new CancellationTokenSource();
-        return new ConnectionLease(connection, cts, ConnectionInfo.None);
+        return new ConnectionLease(connection, cts, ConnectionInfo.None, options: TestWatermarkOptions);
     }
 
     private static WireBuffer CreateTestBuffer(params byte[] data)

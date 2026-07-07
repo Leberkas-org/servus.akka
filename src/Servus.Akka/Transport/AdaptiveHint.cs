@@ -3,8 +3,7 @@ namespace Servus.Akka.Transport;
 /// <summary>
 /// Adaptive receive-buffer sizing shared by the duplex connection types. Grows the rent hint when a
 /// read fills most of the buffer and shrinks it after a streak of small reads, keeping idle
-/// connections cheap while letting bulk transfers rent large buffers. Lifted verbatim from
-/// <c>SocketPipeConnection.AdaptHint</c>.
+/// connections cheap while letting bulk transfers rent large buffers.
 /// </summary>
 internal static class AdaptiveHint
 {

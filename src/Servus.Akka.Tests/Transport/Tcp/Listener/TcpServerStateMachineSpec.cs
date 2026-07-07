@@ -28,6 +28,14 @@ public sealed class TcpServerStateMachineSpec
     /// <see cref="StreamConnection"/> over <see cref="Stream.Null"/> completes reads/writes
     /// asynchronously on background tasks and cannot be raced against synchronously in a unit test.
     /// </summary>
+    // Explicit 512K/256K watermarks: the tests below assert pause/resume behavior at those exact
+    // boundaries, independent of TransportConnectionOptions' Kestrel-aligned 64K/32K defaults.
+    private static readonly TransportConnectionOptions TestWatermarkOptions = new()
+    {
+        OutputHighWatermark = 512 * 1024,
+        OutputLowWatermark = 256 * 1024
+    };
+
     private static (TcpServerStateMachine Sm, MockConnectionOperations Ops, FakeDuplexConnection Connection)
         CreateStateMachineWithFakeConnection()
     {
@@ -35,6 +43,7 @@ public sealed class TcpServerStateMachineSpec
         var connection = new FakeDuplexConnection();
         var sm = new TcpServerStateMachine(
             ops, ActorRefs.Nobody, Stream.Null, TestConnectionInfo,
+            connectionOptions: TestWatermarkOptions,
             connectionFactory: () => connection);
         sm.Start();
         return (sm, ops, connection);

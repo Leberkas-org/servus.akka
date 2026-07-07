@@ -29,13 +29,9 @@ public sealed class ListenerOptionsSpec
         Assert.Equal(512, options.Backlog);
         Assert.Null(options.ServerCertificate);
         Assert.Equal(SslProtocols.None, options.EnabledSslProtocols);
-        Assert.True(options.WaitForData);
         Assert.Equal(64 * 1024, options.ReceiveBufferHint);
-        Assert.Equal(1024 * 1024, options.InputPauseThreshold);
-        Assert.Equal(512 * 1024, options.InputResumeThreshold);
         Assert.Equal(64 * 1024, options.OutputPauseThreshold);
         Assert.Equal(32 * 1024, options.OutputResumeThreshold);
-        Assert.Equal(16 * 1024, options.MinimumSegmentSize);
     }
 
     [Fact(Timeout = 5000)]
