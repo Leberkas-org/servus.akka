@@ -296,17 +296,10 @@ internal sealed class QuicServerStateMachine(
 
     private void CheckForConnectionMigration()
     {
-        var currentRemote = connectionHandle.RemoteEndPoint();
-        if (currentRemote is null || _lastRemoteEndPoint is null)
+        if (ConnectionMigrationCheck.TryDetect(
+                connectionHandle.RemoteEndPoint(), ref _lastRemoteEndPoint, out var old, out var current))
         {
-            return;
-        }
-
-        if (!currentRemote.Equals(_lastRemoteEndPoint))
-        {
-            var old = _lastRemoteEndPoint;
-            _lastRemoteEndPoint = currentRemote;
-            ops.OnPushInbound(new ConnectionMigrationDetected(old, currentRemote));
+            ops.OnPushInbound(new ConnectionMigrationDetected(old, current));
         }
     }
 
