@@ -559,18 +559,7 @@ public sealed class QuicTransportStateMachine(
         _connectionLease = null;
     }
 
-    private static bool IsConnectionLevelError(Exception ex)
-    {
-        if (ex is System.Net.Quic.QuicException qe)
-        {
-            return qe.QuicError is System.Net.Quic.QuicError.ConnectionAborted
-                or System.Net.Quic.QuicError.ConnectionIdle
-                or System.Net.Quic.QuicError.ConnectionRefused
-                or System.Net.Quic.QuicError.ConnectionTimeout;
-        }
-
-        return ex is ObjectDisposedException;
-    }
+    private static bool IsConnectionLevelError(Exception ex) => QuicErrorClassifier.IsConnectionLevel(ex);
 }
 
 #pragma warning restore CA1416

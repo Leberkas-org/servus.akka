@@ -228,10 +228,16 @@ internal sealed class QuicListenerStage
                     {
                         return null;
                     }
-                    catch
+                    catch (QuicException ex) when (!QuicErrorClassifier.IsConnectionLevel(ex))
                     {
+                        // Transient, non-fatal accept failure: swallow to null so the caller's accept loop
+                        // treats it the same as a clean terminal stop (mirrors the client's accept-loop
+                        // semantics), without misclassifying a dead connection as "keep looping".
                         return null;
                     }
+                    // Connection-level QuicExceptions (aborted/idle/refused/timeout) and any other
+                    // unexpected exception propagate so the caller's outer catch can log/classify them
+                    // distinctly instead of every failure being silently swallowed to null.
                 },
                 getLocalEndPoint: () => connection.LocalEndPoint,
                 getRemoteEndPoint: () => connection.RemoteEndPoint,

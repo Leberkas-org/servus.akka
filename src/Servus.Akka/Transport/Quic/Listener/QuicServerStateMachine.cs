@@ -346,7 +346,12 @@ internal sealed class QuicServerStateMachine(
 
                 if (result is null)
                 {
-                    continue;
+                    // Mirror the client accept loop's semantics (QuicTransportStateMachine.AcceptLoopAsync):
+                    // a null result here (the cancellation case is handled above) means the underlying
+                    // accept threw a terminal, connection-level error — stop the loop instead of
+                    // busy-spinning on a dead connection (the old `continue` re-issued the accept in a
+                    // tight loop with no backoff).
+                    return;
                 }
 
                 self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));

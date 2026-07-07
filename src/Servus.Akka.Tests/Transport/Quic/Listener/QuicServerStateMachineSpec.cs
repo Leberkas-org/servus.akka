@@ -355,6 +355,34 @@ public sealed class QuicServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public async Task AcceptLoop_should_stop_on_terminal_null_instead_of_busy_spinning()
+    {
+        var acceptCallCount = 0;
+        var handle = new QuicConnectionHandle(
+            openStream: (_, _) => Task.FromResult<(Stream, long)>((Stream.Null, 1)),
+            acceptInboundStream: _ =>
+            {
+                Interlocked.Increment(ref acceptCallCount);
+                return Task.FromResult<(Stream, long)?>(null);
+            },
+            getLocalEndPoint: () => new IPEndPoint(IPAddress.Loopback, 5000),
+            getRemoteEndPoint: () => null,
+            dispose: () => default);
+
+        var (sm, _) = CreateStateMachine(handle);
+        sm.Start();
+
+        await Task.Delay(100);
+        var countAfterFirstWindow = Volatile.Read(ref acceptCallCount);
+
+        await Task.Delay(150);
+        var countAfterSecondWindow = Volatile.Read(ref acceptCallCount);
+
+        Assert.Equal(1, countAfterFirstWindow);
+        Assert.Equal(countAfterFirstWindow, countAfterSecondWindow);
+    }
+
+    [Fact(Timeout = 5000)]
     public void HandlePush_MultiplexedData_after_disconnect_should_dispose_buffer()
     {
         var (sm, ops) = CreateStateMachine();
