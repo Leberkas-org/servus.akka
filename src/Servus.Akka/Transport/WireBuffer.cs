@@ -1,13 +1,18 @@
 using System.Buffers;
-using static Servus.Senf;
 
 namespace Servus.Akka.Transport;
 
 /// <summary>
-/// The transport's single pooled buffer owner: an array from the cross-thread <see cref="SharedPool"/>
-/// (or a wrapped external array/owner) plus offset/length, in one pooled wrapper. Ownership transfers
-/// with the instance — whoever holds it disposes it exactly once; Dispose returns the array to its
-/// pool and the wrapper to the wrapper pool.
+/// The transport's single buffer owner: an array from the cross-thread <see cref="SharedPool"/>
+/// (or a wrapped external array/owner) plus offset/length. Ownership transfers with the instance —
+/// whoever holds it disposes it exactly once; Dispose returns the array to its pool.
+/// <para>
+/// The wrapper object itself is NOT pooled: each rent allocates a fresh instance. Pooling a ~40-byte
+/// wrapper only trades a Gen0 bump-allocation for a contended object-pool rent/return, which measures
+/// break-even-or-worse under HTTP/2-3 cross-thread multiplexing — and a fresh instance per rent makes
+/// the spent flag permanently reliable, so a stale post-re-rent dispose is structurally impossible
+/// (no ABA). The expensive pooling — the <see cref="SharedPool"/> array pool — is retained.
+/// </para>
 /// </summary>
 public sealed class WireBuffer : IMemoryOwner<byte>
 {
@@ -20,22 +25,18 @@ public sealed class WireBuffer : IMemoryOwner<byte>
     public static readonly ArrayPool<byte> SharedPool =
         ArrayPool<byte>.Create(maxArrayLength: 1024 * 1024, maxArraysPerBucket: 1024);
 
-    private static ObjectPool<WireBuffer> _wrapperPool = new(1024);
-
-    /// <summary>Startup-only: replaces the wrapper pool. Not safe once buffers are in flight.</summary>
-    public static void ConfigureWrapperPool(int size) => _wrapperPool = new ObjectPool<WireBuffer>(size);
-
     private byte[]? _array;
     private ArrayPool<byte>? _returnPool;      // null: array is not pool-owned (external Wrap)
     private IDisposable? _externalOwner;       // set only by Wrap(IMemoryOwner, ...)
     private int _offset;
+    private bool _disposed;
 
     public int Length { get; set; }
     public int Offset => _offset;
     public int Capacity => _array?.Length ?? 0;
-    public Memory<byte> Memory => _array.AsMemory(_offset, Length);
-    public ReadOnlySpan<byte> Span => _array.AsSpan(_offset, Length);
-    public Memory<byte> FullMemory => _array.AsMemory();
+    public Memory<byte> Memory { get { ThrowIfDisposed(); return _array.AsMemory(_offset, Length); } }
+    public ReadOnlySpan<byte> Span { get { ThrowIfDisposed(); return _array.AsSpan(_offset, Length); } }
+    public Memory<byte> FullMemory { get { ThrowIfDisposed(); return _array.AsMemory(); } }
 
     public static WireBuffer Rent(int minimumSize)
     {
@@ -73,34 +74,34 @@ public sealed class WireBuffer : IMemoryOwner<byte>
         return buf;
     }
 
-    private static WireBuffer RentWrapper()
-    {
-        if (!_wrapperPool.TryRent(out var buf))
-        {
-            buf = new WireBuffer();
-        }
-
-        return buf;
-    }
+    private static WireBuffer RentWrapper() => new();
 
     public void Dispose()
     {
-        var array = _array;
-        if (array is null)
+        // Idempotent: a second Dispose is a safe no-op. Because the wrapper is never reused across
+        // owners, the spent flag stays true for the life of this instance — so a stale, post-re-rent
+        // dispose from another owner cannot free or corrupt anyone else's array.
+        if (_disposed)
         {
-            Tracing.For("Transport").Warning(this,
-                "WireBuffer double-dispose detected — wrapper NOT re-returned to pool. Stack: {0}",
-                Environment.StackTrace);
             return;
         }
 
+        _disposed = true;
+        var array = _array;
         _array = null;
-        _returnPool?.Return(array);
+        _returnPool?.Return(array!);
         _returnPool = null;
         _externalOwner?.Dispose();
         _externalOwner = null;
-        _offset = 0;
-        Length = 0;
-        _wrapperPool.Return(this);
+    }
+
+    private void ThrowIfDisposed()
+    {
+        if (_disposed)
+        {
+            throw new ObjectDisposedException(nameof(WireBuffer),
+                "This WireBuffer was disposed; its backing array was returned to the pool. " +
+                "Accessing Memory/Span/FullMemory after disposal is a use-after-free.");
+        }
     }
 }

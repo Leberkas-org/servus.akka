@@ -74,7 +74,7 @@ public sealed class WireBufferSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Rent_after_dispose_should_reuse_wrapper_with_reset_state()
+    public void Rent_after_dispose_should_start_with_clean_state()
     {
         var buf = WireBuffer.Rent(64);
         buf.Length = 42;
@@ -82,6 +82,7 @@ public sealed class WireBufferSpec
 
         var buf2 = WireBuffer.Rent(64);
 
+        Assert.NotSame(buf, buf2);
         Assert.Equal(0, buf2.Length);
         Assert.Equal(0, buf2.Offset);
 
@@ -165,14 +166,15 @@ public sealed class WireBufferSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Dispose_should_return_to_pool()
+    public void Dispose_should_release_array_without_reusing_the_wrapper()
     {
         var buf = WireBuffer.Rent(64);
         buf.Dispose();
 
         var buf2 = WireBuffer.Rent(64);
 
-        Assert.Same(buf, buf2);
+        // The wrapper is no longer pooled; each rent is a fresh instance.
+        Assert.NotSame(buf, buf2);
 
         buf2.Dispose();
     }
@@ -224,14 +226,14 @@ public sealed class WireBufferSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Wrap_owner_should_return_wrapper_to_pool_on_dispose()
+    public void Wrap_owner_should_use_a_fresh_wrapper()
     {
         var first = WireBuffer.Rent(64);
         first.Dispose();
 
         var buf = WireBuffer.Wrap(new TrackingMemoryOwner(16), 0, 4);
 
-        Assert.Same(first, buf);
+        Assert.NotSame(first, buf);
 
         buf.Dispose();
     }
@@ -257,21 +259,90 @@ public sealed class WireBufferSpec
     }
 
     [Fact(Timeout = 5000)]
-    public void Wrap_owner_with_offset_should_not_leak_offset_into_reused_buffer()
+    public void Rent_should_start_at_offset_zero_after_a_wrapped_slice_was_disposed()
     {
         var first = WireBuffer.Wrap(new TrackingMemoryOwner(64), 16, 8);
         first.Dispose();
 
-        // The same instance is recycled; a plain Rent must start at offset 0 so Memory
-        // covers [0..Length], not the previous sliced range.
-        var reused = WireBuffer.Rent(64);
-        Assert.Same(first, reused);
-        reused.Length = 64;
+        // A fresh Rent must start at offset 0 so Memory covers [0..Length], regardless of any
+        // previously wrapped sliced range.
+        var next = WireBuffer.Rent(64);
+        Assert.NotSame(first, next);
+        next.Length = 64;
 
-        Assert.Equal(64, reused.Memory.Length);
-        Assert.True(reused.FullMemory.Length >= 64);
+        Assert.Equal(0, next.Offset);
+        Assert.Equal(64, next.Memory.Length);
+        Assert.True(next.FullMemory.Length >= 64);
 
-        reused.Dispose();
+        next.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Span_after_dispose_should_throw_ObjectDisposedException()
+    {
+        var buf = WireBuffer.Rent(64);
+        buf.Length = 4;
+        buf.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = buf.Span.Length);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Memory_after_dispose_should_throw_ObjectDisposedException()
+    {
+        var buf = WireBuffer.Rent(64);
+        buf.Length = 4;
+        buf.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = buf.Memory);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void FullMemory_after_dispose_should_throw_ObjectDisposedException()
+    {
+        var buf = WireBuffer.Rent(64);
+        buf.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = buf.FullMemory);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Rent_after_dispose_should_return_a_fresh_wrapper_instance()
+    {
+        var buf = WireBuffer.Rent(64);
+        buf.Dispose();
+
+        // The wrapper is NOT pooled/reused across owners: a re-rent yields a fresh instance,
+        // which is what makes a stale dispose harmless (ABA is structurally impossible).
+        var next = WireBuffer.Rent(64);
+
+        Assert.NotSame(buf, next);
+        next.Length = 2;
+        Assert.Equal(2, next.Span.Length);
+
+        next.Dispose();
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Stale_dispose_after_rerent_should_not_corrupt_the_new_buffer()
+    {
+        // Owner A rents and disposes. A stale reference to A's (now-disposed) wrapper is kept.
+        var stale = WireBuffer.Rent(64);
+        stale.Dispose();
+
+        // Owner B rents fresh and writes.
+        var live = WireBuffer.Rent(64);
+        live.Length = 4;
+        live.Memory.Span[0] = 0xAB;
+
+        // A late, erroneous dispose of the stale reference must be a clean no-op — it cannot
+        // free or re-pool anything belonging to the live buffer.
+        stale.Dispose();
+
+        Assert.Equal(4, live.Span.Length);
+        Assert.Equal(0xAB, live.Span[0]);
+
+        live.Dispose();
     }
 
     private sealed class TrackingMemoryOwner(int size) : IMemoryOwner<byte>
