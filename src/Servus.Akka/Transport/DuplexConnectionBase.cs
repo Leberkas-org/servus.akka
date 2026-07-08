@@ -23,6 +23,7 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     private CancellationTokenSource _receiveCts;
     private ManualResetValueTaskSourceCore<bool> _settleSource;
     private bool _receiveActive;
+    private bool _completed;
     private int _receiveHint;
     private int _shrinkStreak;
 
@@ -30,19 +31,37 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
     protected int ReceiveHint => _receiveHint;
 
-    protected DuplexConnectionBase(int receiveBufferHint, Task? sendLoopStartGate = null)
+    /// <param name="channelCapacity">
+    /// Outbound channel bound. <c>&lt;= 0</c> creates an unbounded channel (TCP — shared by H2/H1 whose
+    /// in-flight legitimately exceeds a tight bound). A positive value bounds the channel (QUIC-per-stream
+    /// POC safety net) — <see cref="TryEnqueue"/> returns false and fails loud when it is full while still
+    /// active, which indicates broken outbound credit accounting upstream.
+    /// </param>
+    protected DuplexConnectionBase(int receiveBufferHint, int channelCapacity, Task? sendLoopStartGate = null)
     {
         _receiveHint = receiveBufferHint;
         _receiveCts = new CancellationTokenSource();
         _lifetimeCts = new CancellationTokenSource();
         _settleSource.RunContinuationsAsynchronously = true;
 
-        _channel = Channel.CreateUnbounded<WireBuffer>(new UnboundedChannelOptions
-        {
-            SingleReader = true,
-            SingleWriter = true,
-            AllowSynchronousContinuations = false,
-        });
+        _channel = channelCapacity <= 0
+            ? Channel.CreateUnbounded<WireBuffer>(new UnboundedChannelOptions
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false,
+            })
+            : Channel.CreateBounded<WireBuffer>(new BoundedChannelOptions(channelCapacity)
+            {
+                SingleReader = true,
+                SingleWriter = true,
+                AllowSynchronousContinuations = false,
+                // Wait (not DropWrite): TryWrite returns false immediately on a full channel — non-blocking,
+                // since this code path only ever calls TryWrite, never WriteAsync. That false-on-full is
+                // exactly what drives TryEnqueue's fail-loud branch below. DropWrite would instead return
+                // true and silently drop+leak the buffer, defeating the fail-loud contract entirely.
+                FullMode = BoundedChannelFullMode.Wait,
+            });
 
         var ct = _lifetimeCts.Token;
 
@@ -101,7 +120,23 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     /// </summary>
     protected abstract ValueTask<WireBuffer?> ReceiveDataAsync(CancellationToken ct);
 
-    public bool TryEnqueue(WireBuffer buffer) => _channel.Writer.TryWrite(buffer);
+    public bool TryEnqueue(WireBuffer buffer)
+    {
+        if (_channel.Writer.TryWrite(buffer))
+        {
+            return true;
+        }
+
+        if (!_completed)
+        {
+            // Bounded channel full while the writer is still open — the outbound byte-credit gate should
+            // have parked the producer long before this. Reaching here is a credit-accounting bug.
+            Tracing.For("Transport").Error(this,
+                "Outbound channel full while active (capacity exceeded) — failing connection; this indicates broken outbound credit accounting.");
+        }
+
+        return false;
+    }
 
     /// <remarks>
     /// Single-caller contract: <see cref="QuiesceAsync"/> and <see cref="DisposeAsync"/> are never invoked
@@ -126,6 +161,7 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
     public async Task CompleteAndDrainOutputAsync()
     {
+        _completed = true;
         _channel.Writer.TryComplete();
         await _sendLoop;
     }
@@ -235,6 +271,7 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
         await PreDrainShutdownAsync();
 
+        _completed = true;
         _channel.Writer.TryComplete();
 
         try

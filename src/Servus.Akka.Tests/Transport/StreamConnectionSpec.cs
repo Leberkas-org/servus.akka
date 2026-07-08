@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using Servus.Akka.Transport;
+using Servus.Diagnostics;
+using static Servus.Senf;
 
 namespace Servus.Akka.Tests.Transport;
 
@@ -308,6 +310,115 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
         buffer.Dispose();
 
         await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_should_fail_loud_when_quicAware_bounded_channel_full_while_active()
+    {
+        // Send loop is gated so nothing ever drains: capacity 2 fills on the first two enqueues, and the
+        // third — while the writer is still open (active) — must fail loud (return false + log Error).
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var connection = new StreamConnection(_clientStream, options, quicAware: true, gate.Task);
+
+        var listener = new RecordingErrorListener();
+        Tracing.Configure(listener, TraceLevel.Error, category => category == "Transport");
+        try
+        {
+            Assert.True(connection.TryEnqueue(MakeBuffer("a"u8.ToArray())));
+            Assert.True(connection.TryEnqueue(MakeBuffer("b"u8.ToArray())));
+
+            var overflow = MakeBuffer("c"u8.ToArray());
+            Assert.False(connection.TryEnqueue(overflow));
+            overflow.Dispose();
+        }
+        finally
+        {
+            Tracing.Disable();
+        }
+
+        Assert.Single(listener.Events);
+
+        gate.SetResult();
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_after_completion_on_bounded_channel_should_return_false_without_logging()
+    {
+        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var connection = new StreamConnection(_clientStream, options, quicAware: true);
+
+        await connection.CompleteAndDrainOutputAsync();
+
+        var listener = new RecordingErrorListener();
+        Tracing.Configure(listener, TraceLevel.Error, category => category == "Transport");
+
+        bool enqueued;
+        var buffer = MakeBuffer("late"u8.ToArray());
+        try
+        {
+            enqueued = connection.TryEnqueue(buffer);
+        }
+        finally
+        {
+            Tracing.Disable();
+        }
+
+        Assert.False(enqueued);
+        Assert.Empty(listener.Events);
+
+        buffer.Dispose();
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_non_quicAware_should_stay_unbounded_even_with_small_capacity_option()
+    {
+        // quicAware defaults to false: OutboundChannelCapacity must be ignored (TCP/non-quic stays
+        // unbounded), so three enqueues on a gated, never-draining send loop all still succeed.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var connection = new StreamConnection(_clientStream, options, quicAware: false, gate.Task);
+
+        Assert.True(connection.TryEnqueue(MakeBuffer("a"u8.ToArray())));
+        Assert.True(connection.TryEnqueue(MakeBuffer("b"u8.ToArray())));
+        Assert.True(connection.TryEnqueue(MakeBuffer("c"u8.ToArray())));
+
+        gate.SetResult();
+        await connection.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Captures only Error-level events on the "Transport" category (already restricted by the
+    /// <see cref="Tracing.Configure"/> filter passed at the call site) so the fail-loud log path in
+    /// <see cref="DuplexConnectionBase.TryEnqueue"/> can be asserted directly instead of only by its
+    /// boolean return value.
+    /// </summary>
+    private sealed class RecordingErrorListener : IServusTraceListener
+    {
+        private readonly List<string> _events = [];
+
+        public IReadOnlyList<string> Events
+        {
+            get
+            {
+                lock (_events)
+                {
+                    return _events.ToArray();
+                }
+            }
+        }
+
+        public bool IsEnabled(TraceLevel level, string category) => true;
+
+        public void Write(in TraceEvent evt)
+        {
+            lock (_events)
+            {
+                _events.Add(evt.FormatMessage());
+            }
+        }
     }
 
     [Fact(Timeout = 5000)]

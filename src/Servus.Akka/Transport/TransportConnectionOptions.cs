@@ -15,6 +15,14 @@ internal sealed record TransportConnectionOptions
     public int? MaxBytesPerSend { get; init; }
     public int CoalesceThreshold { get; init; } = 16 * 1024;
 
+    /// <summary>
+    /// Outbound channel bound used only for QUIC-per-stream connections (<see cref="StreamConnection"/>
+    /// when <c>quicAware</c> is set) as a POC safety net against unbounded credit-accounting bugs. TCP
+    /// (<see cref="RawSocketConnection"/>) always passes <c>0</c> (unbounded) — it is shared by H2/H1
+    /// whose in-flight count legitimately exceeds a tight bound and would false-trip.
+    /// </summary>
+    public int OutboundChannelCapacity { get; init; } = 64;
+
     internal static TransportConnectionOptions FromListener(ListenerOptions listener) => new()
     {
         ReceiveBufferHint = listener.ReceiveBufferHint,
