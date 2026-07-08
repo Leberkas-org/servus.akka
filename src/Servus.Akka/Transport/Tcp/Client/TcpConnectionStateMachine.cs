@@ -298,6 +298,7 @@ internal sealed class TcpConnectionStateMachine(
     {
         var before = _bytesInFlight;
         _bytesInFlight -= bytes;
+        ops.OnPushInbound(new TransportDataFlushed(bytes));
 
         if (_upstreamFinished)
         {

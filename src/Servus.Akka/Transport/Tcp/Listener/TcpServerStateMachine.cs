@@ -175,6 +175,7 @@ internal sealed class TcpServerStateMachine(
     {
         var before = _bytesInFlight;
         _bytesInFlight -= bytes;
+        ops.OnPushInbound(new TransportDataFlushed(bytes));
 
         if (before >= _lowWatermark && _bytesInFlight < _lowWatermark)
         {

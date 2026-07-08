@@ -731,6 +731,22 @@ public sealed class TcpConnectionStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void SendFlushed_should_push_TransportDataFlushed_with_flushed_byte_count()
+    {
+        var (sm, ops) = CreateStateMachine();
+        var lease = CreateTestLease(out _);
+        sm.Dispatch(new LeaseAcquired(lease));
+
+        var buffer = CreateTestBuffer(1, 2, 3, 4);
+        sm.HandlePush(TransportData.Rent(buffer)); // 4 bytes in flight
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new SendFlushed(4, Gen: 1));
+
+        Assert.Equal(4, ops.PushedInbound.OfType<TransportDataFlushed>().Single().Bytes);
+    }
+
+    [Fact(Timeout = 5000)]
     public void UpstreamFinish_with_bytes_in_flight_should_complete_after_final_SendFlushed()
     {
         var (sm, ops) = CreateStateMachine();

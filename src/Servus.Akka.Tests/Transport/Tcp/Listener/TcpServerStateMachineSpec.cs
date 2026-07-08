@@ -384,6 +384,20 @@ public sealed class TcpServerStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void SendFlushed_should_push_TransportDataFlushed_with_flushed_byte_count()
+    {
+        var (sm, ops, _) = CreateStateMachineWithFakeConnection();
+
+        var buffer = CreateTestBuffer(1, 2, 3, 4);
+        sm.HandlePush(TransportData.Rent(buffer)); // 4 bytes in flight
+        ops.PushedInbound.Clear();
+
+        sm.Dispatch(new SendFlushed(4, Gen: 1));
+
+        Assert.Equal(4, ops.PushedInbound.OfType<TransportDataFlushed>().Single().Bytes);
+    }
+
+    [Fact(Timeout = 5000)]
     public void SendFlushed_stale_gen_should_be_ignored()
     {
         var (sm, ops, _) = CreateStateMachineWithFakeConnection();

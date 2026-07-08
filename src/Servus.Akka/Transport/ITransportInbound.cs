@@ -19,3 +19,7 @@ public sealed record StreamReadCompleted(StreamTarget Id) : ITransportInbound;
 public sealed record ServerStreamAccepted(StreamTarget Id, StreamDirection Direction) : ITransportInbound;
 
 public sealed record ConnectionMigrationDetected(EndPoint OldEndPoint, EndPoint NewEndPoint) : ITransportInbound;
+
+public sealed record TransportDataFlushed(int Bytes) : ITransportInbound;
+
+public sealed record MultiplexedDataFlushed(StreamTarget StreamId, int Bytes) : ITransportInbound;
