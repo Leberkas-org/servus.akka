@@ -22,7 +22,7 @@ internal sealed class StreamConnection : DuplexConnectionBase
 
     public StreamConnection(Stream stream, TransportConnectionOptions options,
         bool quicAware = false, bool useZeroByteProbe = false)
-        : base(options.ReceiveBufferHint, quicAware ? options.OutboundChannelCapacity : 0)
+        : base(options.ReceiveBufferHint, quicAware ? options.OutboundQueuedByteCap : 0)
     {
         _stream = stream;
         _quicAware = quicAware;
@@ -31,16 +31,16 @@ internal sealed class StreamConnection : DuplexConnectionBase
     }
 
     internal StreamConnection(Stream stream, TransportConnectionOptions options, Task? sendLoopStartGate)
-        : base(options.ReceiveBufferHint, channelCapacity: 0, sendLoopStartGate)
+        : base(options.ReceiveBufferHint, queuedByteCap: 0, sendLoopStartGate)
     {
         _stream = stream;
         _coalesceThreshold = options.CoalesceThreshold;
     }
 
-    /// <summary>Test-only: bounded (quic-aware) channel with a gated send loop, for overflow specs.</summary>
+    /// <summary>Test-only: byte-capped (quic-aware) channel with a gated send loop, for overflow specs.</summary>
     internal StreamConnection(Stream stream, TransportConnectionOptions options, bool quicAware,
         Task? sendLoopStartGate)
-        : base(options.ReceiveBufferHint, quicAware ? options.OutboundChannelCapacity : 0, sendLoopStartGate)
+        : base(options.ReceiveBufferHint, quicAware ? options.OutboundQueuedByteCap : 0, sendLoopStartGate)
     {
         _stream = stream;
         _quicAware = quicAware;

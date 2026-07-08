@@ -408,7 +408,7 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     /// interleaving, made deterministic. The send side is a no-op sink.
     /// </summary>
     private sealed class ControllableConnection(TaskCompletionSource<WireBuffer?> receiveGate)
-        : DuplexConnectionBase(receiveBufferHint: 4 * 1024, channelCapacity: 0)
+        : DuplexConnectionBase(receiveBufferHint: 4 * 1024, queuedByteCap: 0)
     {
         protected override ValueTask<WireBuffer?> ReceiveDataAsync(CancellationToken ct)
             => new(receiveGate.Task);

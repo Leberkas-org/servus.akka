@@ -15,14 +15,14 @@ internal sealed class RawSocketConnection : DuplexConnectionBase
     private readonly SocketAwaitable _sender = new();
 
     public RawSocketConnection(Socket socket, TransportConnectionOptions options)
-        : base(options.ReceiveBufferHint, channelCapacity: 0)
+        : base(options.ReceiveBufferHint, queuedByteCap: 0)
     {
         _socket = socket;
         _sender.Configure(options);
     }
 
     internal RawSocketConnection(Socket socket, TransportConnectionOptions options, Task? sendLoopStartGate)
-        : base(options.ReceiveBufferHint, channelCapacity: 0, sendLoopStartGate)
+        : base(options.ReceiveBufferHint, queuedByteCap: 0, sendLoopStartGate)
     {
         _socket = socket;
         _sender.Configure(options);

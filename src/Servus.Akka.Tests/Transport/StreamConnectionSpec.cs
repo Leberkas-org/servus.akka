@@ -325,12 +325,14 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
-    public async Task TryEnqueue_should_fail_loud_when_quicAware_bounded_channel_full_while_active()
+    public async Task TryEnqueue_should_fail_loud_when_quicAware_byte_cap_exceeded_while_active()
     {
-        // Send loop is gated so nothing ever drains: capacity 2 fills on the first two enqueues, and the
-        // third — while the writer is still open (active) — must fail loud (return false + log Error).
+        // Send loop is gated so nothing ever drains: a 2-byte cap is reached by the first two 1-byte
+        // enqueues, and the third — while the writer is still open (active) — must fail loud (return
+        // false + log Error). This is the genuine credit-accounting-bug runaway case: real production
+        // traffic never queues past the byte-credit budget, only a bug that ignores the credit gate does.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var options = new TransportConnectionOptions { OutboundQueuedByteCap = 2 };
         var connection = new StreamConnection(_clientStream, options, quicAware: true, gate.Task);
 
         var listener = new RecordingErrorListener();
@@ -356,9 +358,47 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task TryEnqueue_should_not_false_trip_at_small_chunk_size_within_the_legitimate_byte_budget()
+    {
+        // The finding this guards against: at the DEFAULT byte cap, slicing the full legitimate 256 KB
+        // QUIC per-stream outbound body-byte budget (Http3OutboundWriter.OutboundBodyByteBudget in
+        // GaudiHTTP) into small sub-4 KB chunks used to produce more than the old 64-ITEM channel bound —
+        // false-tripping the fail-loud net on entirely legitimate, correctly-credited traffic. The net is
+        // now byte-denominated, so it must accept the same 256 KB of small chunks without ever tripping,
+        // regardless of how many items that becomes.
+        const int chunkSize = 3 * 1024; // sub-4 KB, deliberately small
+        const int legitimateBudget = 256 * 1024;
+        var chunkCount = (legitimateBudget / chunkSize) + 1; // >= 85 items — far past the old 64-item bound
+        Assert.True(chunkCount > 64);
+
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var connection = new StreamConnection(_clientStream, new TransportConnectionOptions(), quicAware: true, gate.Task);
+
+        var listener = new RecordingErrorListener();
+        Tracing.Configure(listener, TraceLevel.Error, category => category == "Transport");
+        try
+        {
+            for (var i = 0; i < chunkCount; i++)
+            {
+                Assert.True(connection.TryEnqueue(MakeBuffer(new byte[chunkSize])),
+                    $"TryEnqueue false-tripped at item {i} of {chunkCount} — total queued bytes ({(i + 1) * chunkSize}) is still within the legitimate {legitimateBudget}-byte budget.");
+            }
+        }
+        finally
+        {
+            Tracing.Disable();
+        }
+
+        Assert.Empty(listener.Events);
+
+        gate.SetResult();
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task TryEnqueue_after_completion_on_bounded_channel_should_return_false_without_logging()
     {
-        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var options = new TransportConnectionOptions { OutboundQueuedByteCap = 2 };
         var connection = new StreamConnection(_clientStream, options, quicAware: true);
 
         await connection.CompleteAndDrainOutputAsync();
@@ -387,10 +427,10 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     [Fact(Timeout = 5000)]
     public async Task TryEnqueue_non_quicAware_should_stay_unbounded_even_with_small_capacity_option()
     {
-        // quicAware defaults to false: OutboundChannelCapacity must be ignored (TCP/non-quic stays
+        // quicAware defaults to false: OutboundQueuedByteCap must be ignored (TCP/non-quic stays
         // unbounded), so three enqueues on a gated, never-draining send loop all still succeed.
         var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var options = new TransportConnectionOptions { OutboundChannelCapacity = 2 };
+        var options = new TransportConnectionOptions { OutboundQueuedByteCap = 2 };
         var connection = new StreamConnection(_clientStream, options, quicAware: false, gate.Task);
 
         Assert.True(connection.TryEnqueue(MakeBuffer("a"u8.ToArray())));

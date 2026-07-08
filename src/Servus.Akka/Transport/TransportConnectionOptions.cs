@@ -16,12 +16,17 @@ internal sealed record TransportConnectionOptions
     public int CoalesceThreshold { get; init; } = 16 * 1024;
 
     /// <summary>
-    /// Outbound channel bound used only for QUIC-per-stream connections (<see cref="StreamConnection"/>
-    /// when <c>quicAware</c> is set) as a POC safety net against unbounded credit-accounting bugs. TCP
-    /// (<see cref="RawSocketConnection"/>) always passes <c>0</c> (unbounded) — it is shared by H2/H1
-    /// whose in-flight count legitimately exceeds a tight bound and would false-trip.
+    /// Outbound queued-bytes bound used only for QUIC-per-stream connections (<see cref="StreamConnection"/>
+    /// when <c>quicAware</c> is set) as a safety net against unbounded credit-accounting bugs. Denominated
+    /// in BYTES (not items/chunks) so it tracks the same unit as the upstream per-stream outbound
+    /// byte-credit gate (GaudiHTTP's <c>Http3OutboundWriter.OutboundBodyByteBudget</c>, 256 KB) and never
+    /// false-trips just because a small configured body-chunk size slices that budget into many small
+    /// enqueues. The default here is a generous multiple of that budget: only a genuine bug that keeps
+    /// enqueuing past the credit gate (unbounded growth) can trip it. TCP (<see cref="RawSocketConnection"/>)
+    /// always passes <c>0</c> (no cap / unbounded) — it is shared by H2/H1 whose in-flight byte count
+    /// legitimately has no comparable tight bound.
     /// </summary>
-    public int OutboundChannelCapacity { get; init; } = 64;
+    public long OutboundQueuedByteCap { get; init; } = 8 * 256 * 1024;
 
     internal static TransportConnectionOptions FromListener(ListenerOptions listener) => new()
     {

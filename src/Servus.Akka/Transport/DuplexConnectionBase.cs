@@ -8,9 +8,11 @@ namespace Servus.Akka.Transport;
 /// Shared base for full-duplex byte connections. Owns the inbound receive-guard (reentrancy + quiesce
 /// settlement via a zero-alloc <see cref="ManualResetValueTaskSourceCore{TResult}"/>), the adaptive
 /// receive-hint, the outbound <see cref="Channel{T}"/>, the send-loop skeleton, and the
-/// <see cref="DisposeAsync"/> lifecycle. No <see cref="Interlocked"/> or <c>Volatile</c> — all
-/// cross-thread signaling flows through <see cref="CancellationTokenSource.CancelAsync"/> and the
-/// settle source's happens-before edge (Reset on the actor thread, SetResult on the I/O thread).
+/// <see cref="DisposeAsync"/> lifecycle. Cross-thread signaling flows through
+/// <see cref="CancellationTokenSource.CancelAsync"/> and the settle source's happens-before edge (Reset
+/// on the actor thread, SetResult on the I/O thread) — the sole exception is the queued-bytes counter
+/// (<see cref="TryEnqueue"/> / <see cref="ReleaseQueuedBytes"/>), a genuine producer (actor thread) /
+/// send-loop (I/O thread) system boundary, which uses <see cref="Interlocked"/> deliberately.
 /// </summary>
 internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSource<bool>
 {
@@ -19,6 +21,7 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     private readonly Channel<WireBuffer> _channel;
     private readonly Task _sendLoop;
     private readonly CancellationTokenSource _lifetimeCts;
+    private readonly long _queuedByteCap;
 
     private CancellationTokenSource _receiveCts;
     private ManualResetValueTaskSourceCore<bool> _settleSource;
@@ -26,42 +29,35 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     private bool _completed;
     private int _receiveHint;
     private int _shrinkStreak;
+    private long _queuedBytes;
 
     public Action<int>? OnFlushed { get; set; }
 
     protected int ReceiveHint => _receiveHint;
 
-    /// <param name="channelCapacity">
-    /// Outbound channel bound. <c>&lt;= 0</c> creates an unbounded channel (TCP — shared by H2/H1 whose
-    /// in-flight legitimately exceeds a tight bound). A positive value bounds the channel (QUIC-per-stream
-    /// POC safety net) — <see cref="TryEnqueue"/> returns false and fails loud when it is full while still
-    /// active, which indicates broken outbound credit accounting upstream.
+    /// <param name="queuedByteCap">
+    /// Outbound queued-bytes cap. <c>&lt;= 0</c> disables the cap (TCP — shared by H2/H1 whose in-flight
+    /// byte count legitimately has no comparable tight bound). A positive value tracks bytes enqueued via
+    /// <see cref="TryEnqueue"/> minus bytes drained by the send loop (QUIC-per-stream safety net) —
+    /// <see cref="TryEnqueue"/> returns false and fails loud when the running total would exceed the cap
+    /// while still active, which indicates broken outbound credit accounting upstream. The channel itself
+    /// is always unbounded (item count never gates); byte tracking is the sole enforcement so it can never
+    /// false-trip purely from a small configured chunk size producing more (smaller) enqueued items.
     /// </param>
-    protected DuplexConnectionBase(int receiveBufferHint, int channelCapacity, Task? sendLoopStartGate = null)
+    protected DuplexConnectionBase(int receiveBufferHint, long queuedByteCap, Task? sendLoopStartGate = null)
     {
         _receiveHint = receiveBufferHint;
         _receiveCts = new CancellationTokenSource();
         _lifetimeCts = new CancellationTokenSource();
+        _queuedByteCap = queuedByteCap;
         _settleSource.RunContinuationsAsynchronously = true;
 
-        _channel = channelCapacity <= 0
-            ? Channel.CreateUnbounded<WireBuffer>(new UnboundedChannelOptions
-            {
-                SingleReader = true,
-                SingleWriter = true,
-                AllowSynchronousContinuations = false,
-            })
-            : Channel.CreateBounded<WireBuffer>(new BoundedChannelOptions(channelCapacity)
-            {
-                SingleReader = true,
-                SingleWriter = true,
-                AllowSynchronousContinuations = false,
-                // Wait (not DropWrite): TryWrite returns false immediately on a full channel — non-blocking,
-                // since this code path only ever calls TryWrite, never WriteAsync. That false-on-full is
-                // exactly what drives TryEnqueue's fail-loud branch below. DropWrite would instead return
-                // true and silently drop+leak the buffer, defeating the fail-loud contract entirely.
-                FullMode = BoundedChannelFullMode.Wait,
-            });
+        _channel = Channel.CreateUnbounded<WireBuffer>(new UnboundedChannelOptions
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            AllowSynchronousContinuations = false,
+        });
 
         var ct = _lifetimeCts.Token;
 
@@ -122,17 +118,38 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
     public bool TryEnqueue(WireBuffer buffer)
     {
+        // Cross-thread producer/send-loop counter — a genuine system boundary, so Interlocked (not a
+        // plain field) is required even under the repo's actor-confinement threading model.
+        if (_queuedByteCap > 0)
+        {
+            var queued = Interlocked.Add(ref _queuedBytes, buffer.Length);
+            if (queued > _queuedByteCap)
+            {
+                Interlocked.Add(ref _queuedBytes, -buffer.Length);
+
+                if (!_completed)
+                {
+                    // Queued-but-unflushed bytes exceed the cap while the writer is still open — the
+                    // outbound byte-credit gate should have parked the producer long before this.
+                    // Reaching here is a credit-accounting bug, never a legitimately-credited chunk size.
+                    Tracing.For("Transport").Error(this,
+                        "Outbound queued bytes ({0}) exceed the {1}-byte cap while active — failing connection; this indicates broken outbound credit accounting.",
+                        queued, _queuedByteCap);
+                }
+
+                return false;
+            }
+        }
+
         if (_channel.Writer.TryWrite(buffer))
         {
             return true;
         }
 
-        if (!_completed)
+        // The channel is always unbounded — TryWrite only fails once the writer has completed.
+        if (_queuedByteCap > 0)
         {
-            // Bounded channel full while the writer is still open — the outbound byte-credit gate should
-            // have parked the producer long before this. Reaching here is a credit-accounting bug.
-            Tracing.For("Transport").Error(this,
-                "Outbound channel full while active (capacity exceeded) — failing connection; this indicates broken outbound credit accounting.");
+            Interlocked.Add(ref _queuedBytes, -buffer.Length);
         }
 
         return false;
@@ -175,6 +192,20 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     /// <summary>Writes one drained batch to the transport. Returns the total bytes written.</summary>
     protected abstract ValueTask<int> WriteBatchAsync(List<WireBuffer> batch, CancellationToken ct);
 
+    /// <summary>
+    /// Releases bytes previously reserved by <see cref="TryEnqueue"/> once the send loop has drained them
+    /// (written, aborted, or torn down) — the same producer/send-loop cross-thread counter, so
+    /// <see cref="Interlocked"/> is required. No-op when the byte cap is disabled (<c>_queuedByteCap &lt;= 0</c>,
+    /// e.g. TCP), keeping that path free of the extra atomic op.
+    /// </summary>
+    private void ReleaseQueuedBytes(int bytes)
+    {
+        if (_queuedByteCap > 0 && bytes != 0)
+        {
+            Interlocked.Add(ref _queuedBytes, -bytes);
+        }
+    }
+
     private async Task RunSendLoopAsync(
         ChannelReader<WireBuffer> reader, CancellationToken ct, Task? startGate)
     {
@@ -202,12 +233,15 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
                 if (ShouldAbortSendLoop())
                 {
+                    var abortedBytes = 0;
                     for (var i = 0; i < batch.Count; i++)
                     {
+                        abortedBytes += batch[i].Length;
                         batch[i].Dispose();
                     }
 
                     batch.Clear();
+                    ReleaseQueuedBytes(abortedBytes);
 
                     try
                     {
@@ -229,6 +263,7 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
                 }
 
                 batch.Clear();
+                ReleaseQueuedBytes(total);
 
                 try
                 {
@@ -242,10 +277,14 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
         }
         catch (Exception ex) when (ConnectionErrors.IsTeardown(ex))
         {
+            var tornDownBytes = 0;
             for (var i = 0; i < batch.Count; i++)
             {
+                tornDownBytes += batch[i].Length;
                 batch[i].Dispose();
             }
+
+            ReleaseQueuedBytes(tornDownBytes);
         }
         finally
         {
