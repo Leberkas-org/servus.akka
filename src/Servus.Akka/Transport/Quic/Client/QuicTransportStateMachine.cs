@@ -88,6 +88,9 @@ internal sealed class QuicTransportStateMachine : IQuicStreamReadHost
             case MigrationDetected e:
                 _ops.OnPushInbound(new ConnectionMigrationDetected(e.OldEndPoint, e.NewEndPoint));
                 break;
+            case StreamSendFlushed e:
+                _lifecycle.OnStreamSendFlushed(e.StreamId, e.Bytes, e.Epoch);
+                break;
         }
     }
 

@@ -105,6 +105,11 @@ internal sealed class QuicStreamLifecycle
         }
 
         state.AttachConnection(stream, rawStreamId);
+
+        var leaseEpoch = state.Epoch;
+        var leaseStreamId = streamId.Value;
+        state.SetFlushCallback(bytes => _self.Tell(new StreamSendFlushed(leaseStreamId, bytes, leaseEpoch)));
+
         if (state.Direction == StreamDirection.Bidirectional)
         {
             RequestStreamRead(streamId);
@@ -123,8 +128,35 @@ internal sealed class QuicStreamLifecycle
         state.AttachConnection(stream, rawStreamId);
         _streams[streamId] = state;
 
+        var acceptEpoch = state.Epoch;
+        var acceptStreamId = streamId.Value;
+        state.SetFlushCallback(bytes => _self.Tell(new StreamSendFlushed(acceptStreamId, bytes, acceptEpoch)));
+
         _ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
         RequestStreamRead(streamId);
+    }
+
+    /// <summary>
+    /// Handles a real per-stream wire flush (<see cref="StreamSendFlushed"/>, wired via
+    /// <see cref="QuicStreamState.SetFlushCallback"/>) by pushing the ack inbound as
+    /// <see cref="MultiplexedDataFlushed"/>. Dropped if <paramref name="epoch"/> no longer matches the
+    /// stream's current <see cref="QuicStreamState.Epoch"/> — the slot was torn down and repooled for a
+    /// NEW stream by the time this flush was Told back to the actor.
+    /// </summary>
+    public void OnStreamSendFlushed(long streamId, int bytes, int epoch)
+    {
+        if (bytes <= 0)
+        {
+            return;
+        }
+
+        if (!_streams.TryGetValue(StreamTarget.FromId(streamId), out var state) || state.Epoch != epoch)
+        {
+            // Stale flush from a repooled QuicStreamState — the stream was torn down and the slot reused.
+            return;
+        }
+
+        _ops.OnPushInbound(new MultiplexedDataFlushed(StreamTarget.FromId(streamId), bytes));
     }
 
     public void RequestStreamRead(StreamTarget streamId)

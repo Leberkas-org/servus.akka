@@ -115,6 +115,19 @@ internal sealed class QuicStreamState : IAsyncDisposable
         ReadArmed = false;
     }
 
+    /// <summary>
+    /// Wires the attached <see cref="StreamConnection"/>'s wire-flush callback so the lifecycle can Tell a
+    /// <see cref="StreamSendFlushed"/> event without this type exposing <c>_connection</c> directly. A
+    /// no-op before <see cref="AttachConnection"/> (nothing to wire yet).
+    /// </summary>
+    internal void SetFlushCallback(Action<int> onFlushed)
+    {
+        if (_connection is not null)
+        {
+            _connection.OnFlushed = onFlushed;
+        }
+    }
+
     public async ValueTask DisposeAndReturnAsync()
     {
         // Quiesce the inbound side first: this awaits the settlement of any in-flight receive (its buffer

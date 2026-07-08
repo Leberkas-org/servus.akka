@@ -396,4 +396,30 @@ public sealed class QuicServerStateMachineSpec
 
         Assert.True(ops.PullOutboundCount > 0);
     }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_StreamSendFlushed_with_matching_epoch_should_push_MultiplexedDataFlushed()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+
+        sm.Dispatch(new StreamSendFlushed(4, 4096, state.Epoch));
+
+        var ack = ops.PushedInbound.OfType<MultiplexedDataFlushed>().Single();
+        Assert.Equal(4, ack.StreamId.Value);
+        Assert.Equal(4096, ack.Bytes);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_StreamSendFlushed_with_stale_epoch_should_be_dropped()
+    {
+        var (sm, ops) = CreateStateMachine();
+        sm.Start();
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+
+        sm.Dispatch(new StreamSendFlushed(4, 4096, state.Epoch - 1));
+
+        Assert.Empty(ops.PushedInbound.OfType<MultiplexedDataFlushed>());
+    }
 }

@@ -66,3 +66,11 @@ internal sealed class StreamReceiveFailed : IQuicTransportEvent
 internal readonly record struct InboundStreamAccepted(Stream Stream, long StreamId) : IQuicTransportEvent;
 
 internal readonly record struct MigrationDetected(EndPoint OldEndPoint, EndPoint NewEndPoint) : IQuicTransportEvent;
+
+/// <summary>
+/// A real per-stream wire flush completed on the stream's own <see cref="StreamConnection"/> (wired via
+/// <see cref="QuicStreamState.SetFlushCallback"/>). <see cref="Epoch"/> is the
+/// <see cref="QuicStreamState.Epoch"/> captured when the callback was armed, so a flush from a stream slot
+/// that has since been torn down and repooled for a NEW stream is detectable as stale and dropped.
+/// </summary>
+internal sealed record StreamSendFlushed(long StreamId, int Bytes, int Epoch) : IQuicTransportEvent;

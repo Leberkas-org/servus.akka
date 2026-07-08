@@ -870,6 +870,30 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void Dispatch_StreamSendFlushed_with_matching_epoch_should_push_MultiplexedDataFlushed()
+    {
+        var (ops, sm) = CreateConnectedStateMachine();
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+
+        sm.Dispatch(new StreamSendFlushed(4, 4096, state.Epoch));
+
+        var ack = ops.PushedInbound.OfType<MultiplexedDataFlushed>().Single();
+        Assert.Equal(4, ack.StreamId.Value);
+        Assert.Equal(4096, ack.Bytes);
+    }
+
+    [Fact(Timeout = 5000)]
+    public void Dispatch_StreamSendFlushed_with_stale_epoch_should_be_dropped()
+    {
+        var (ops, sm) = CreateConnectedStateMachine();
+        var state = sm.RegisterTestStream(4, StreamDirection.Bidirectional);
+
+        sm.Dispatch(new StreamSendFlushed(4, 4096, state.Epoch - 1));
+
+        Assert.Empty(ops.PushedInbound.OfType<MultiplexedDataFlushed>());
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task Stale_StreamReceiveCompleted_after_repool_should_be_dropped()
     {
         // Vector A: a success completion produced by PipeTo for a now-dead stream is still in the mailbox
