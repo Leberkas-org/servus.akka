@@ -310,32 +310,32 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
-    public async Task QuiesceAsync_should_return_false_when_data_races_in()
+    public async Task QuiesceAsync_should_return_false_when_data_settles_during_quiesce()
     {
-        await using var connection = new RawSocketConnection(_client, new TransportConnectionOptions());
+        // The old version drove a real socket up to 200 times hoping to hit the interleaving where a
+        // receive settles with a buffer at the exact instant quiesce cancels it — inherently timing
+        // dependent, and it failed to hit that window on CI. Drive the interleaving deterministically:
+        // a controllable receive that ignores cancellation is still in flight when QuiesceAsync parks on
+        // the settle source, then we settle it with a buffer. That is precisely "data raced in", so
+        // QuiesceAsync must report not-clean (false).
+        var receiveGate = new TaskCompletionSource<WireBuffer?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var connection = new ControllableConnection(receiveGate);
 
-        var clean = true;
-        for (var attempt = 0; attempt < 200 && clean; attempt++)
-        {
-            var receiveTask = connection.ReceiveAsync().AsTask();
+        // Arm the receive: ReceiveAsync sets _receiveActive and parks in ReceiveDataAsync on the gate.
+        var receiveTask = connection.ReceiveAsync().AsTask();
 
-            // Push data so the probe can wake before quiesce cancels it.
-            await _server.SendAsync("x"u8.ToArray(), SocketFlags.None, TestContext.Current.CancellationToken);
+        // CancelAsync has no registered callbacks (the controllable receive ignores the token), so it
+        // completes synchronously — QuiesceAsync reads _receiveActive (still true) and parks on the
+        // settle source before returning here. The receive cannot settle until we release the gate.
+        var quiesce = connection.QuiesceAsync().AsTask();
 
-            clean = await connection.QuiesceAsync();
+        // Data "races in": the receive settles with a buffer (not a cancellation) while quiesce is settling.
+        receiveGate.SetResult(MakeBuffer("x"u8.ToArray()));
 
-            // Drain whatever the receive produced so no buffer leaks, regardless of the race outcome.
-            try
-            {
-                var buffer = await receiveTask;
-                buffer?.Dispose();
-            }
-            catch (OperationCanceledException)
-            {
-            }
-        }
+        Assert.False(await quiesce);
 
-        Assert.False(clean);
+        var buffer = await receiveTask;
+        buffer?.Dispose();
     }
 
     [Fact(Timeout = 5000)]
@@ -399,5 +399,21 @@ public sealed class RawSocketConnectionSpec : IAsyncLifetime
         buffer.Dispose();
 
         await connection.DisposeAsync();
+    }
+
+    /// <summary>
+    /// A <see cref="DuplexConnectionBase"/> whose inbound read is driven by a caller-supplied gate instead
+    /// of a socket. The read deliberately ignores its cancellation token so a test can settle it with a
+    /// buffer while <see cref="DuplexConnectionBase.QuiesceAsync"/> is cancelling — the "data races in"
+    /// interleaving, made deterministic. The send side is a no-op sink.
+    /// </summary>
+    private sealed class ControllableConnection(TaskCompletionSource<WireBuffer?> receiveGate)
+        : DuplexConnectionBase(receiveBufferHint: 4 * 1024)
+    {
+        protected override ValueTask<WireBuffer?> ReceiveDataAsync(CancellationToken ct)
+            => new(receiveGate.Task);
+
+        protected override ValueTask<int> WriteBatchAsync(List<WireBuffer> batch, CancellationToken ct)
+            => ValueTask.FromResult(0);
     }
 }
