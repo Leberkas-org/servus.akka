@@ -6,6 +6,18 @@ using static Servus.Senf;
 
 namespace Servus.Akka.Tests.Transport;
 
+/// <summary>
+/// Serializes every test class that reconfigures the process-global <see cref="Servus.Senf.Tracing"/>
+/// via <see cref="Servus.Diagnostics.ServusTrace.Configure"/>. Without this, xUnit runs different
+/// classes' collections in parallel and a concurrent no-filter <c>Tracing.Configure</c> (e.g. from
+/// <c>CompositeTraceListenerSpec</c>) can clobber a listener mid-window — a spurious
+/// <c>Assert.Single</c> failure or a spuriously-passing <c>Assert.Empty</c> that masks a real logging
+/// regression. Members: <see cref="StreamConnectionSpec"/>, <c>CompositeTraceListenerSpec</c>.
+/// </summary>
+[CollectionDefinition("Tracing", DisableParallelization = true)]
+public class TracingCollection;
+
+[Collection("Tracing")]
 public sealed class StreamConnectionSpec : IAsyncLifetime
 {
     private Socket _listener = null!;

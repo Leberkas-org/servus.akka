@@ -10,6 +10,7 @@ namespace Servus.Akka.Tests.Diagnostics;
 /// parallel test collections that also trace cannot bleed into the assertions, and restores the
 /// global tracer in a finally block.
 /// </summary>
+[Collection("Tracing")]
 public sealed class CompositeTraceListenerSpec
 {
     [Fact(Timeout = 5000)]
