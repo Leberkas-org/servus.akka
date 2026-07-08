@@ -78,6 +78,10 @@ internal sealed class QuicTransportStateMachine : IQuicStreamReadHost
             case StreamReceiveFailed e:
                 QuicStreamReads.OnReceiveFailed(this, e.State, e.Error, e.Epoch);
                 break;
+            case AcceptLoopFailed e:
+                Tracing.For("Connection").Warning(this, "QUIC accept loop failed: {0}", e.Error.Message);
+                HandleConnectionFailure(DisconnectReason.Error);
+                break;
             case InboundStreamAccepted e:
                 _lifecycle.OnInboundStreamAccepted(e.Stream, e.StreamId, _transportOptions);
                 break;
@@ -313,26 +317,39 @@ internal sealed class QuicTransportStateMachine : IQuicStreamReadHost
     private static async Task AcceptLoopAsync(
         QuicConnectionHandle handle, IActorRef self, CancellationToken ct)
     {
-        while (!ct.IsCancellationRequested)
+        try
         {
-            var result = await handle.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
-
-            if (ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
-                if (result is not null)
+                var result = await handle.AcceptInboundStreamAsync(ct).ConfigureAwait(false);
+
+                if (ct.IsCancellationRequested)
                 {
-                    await result.Value.Stream.DisposeAsync().ConfigureAwait(false);
+                    if (result is not null)
+                    {
+                        await result.Value.Stream.DisposeAsync().ConfigureAwait(false);
+                    }
+
+                    return;
                 }
 
-                return;
-            }
+                if (result is null)
+                {
+                    return;
+                }
 
-            if (result is null)
-            {
-                return;
+                self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
             }
-
-            self.Tell(new InboundStreamAccepted(result.Value.Stream, result.Value.StreamId));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Graceful shutdown via StopAcceptLoop — not a failure.
+        }
+        catch (Exception ex)
+        {
+            // Never let a connection-level fault become an unobserved task exception: route it to the
+            // actor so it surfaces as a connection failure (and reconnect) instead of silently dying.
+            self.Tell(new AcceptLoopFailed(ex));
         }
     }
 

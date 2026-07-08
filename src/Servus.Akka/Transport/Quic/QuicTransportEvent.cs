@@ -11,6 +11,14 @@ internal readonly record struct StreamLeaseAcquired(Stream Stream, long StreamId
 
 internal readonly record struct AcquisitionFailed(Exception Error) : IQuicTransportEvent;
 
+/// <summary>
+/// The background inbound-stream accept loop terminated with a non-cancellation fault (e.g. a
+/// connection-level <see cref="System.Net.Quic.QuicException"/>). Routed to the actor so the
+/// failure surfaces as a connection failure (and triggers reconnect) instead of vanishing as an
+/// unobserved task exception.
+/// </summary>
+internal readonly record struct AcceptLoopFailed(Exception Error) : IQuicTransportEvent;
+
 // The read-completion events carry the QuicStreamState itself (plus the rent Epoch it was armed under)
 // rather than a stream id + generation: the cached transforms that produce them
 // (QuicStreamState.ReadSuccess/ReadFailure) run on IO-completion threads and must not touch any mutable

@@ -65,6 +65,19 @@ public sealed class QuicTransportStateMachineSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void Dispatch_AcceptLoopFailed_should_signal_transport_disconnected()
+    {
+        var (ops, sm) = CreateConnectedStateMachine();
+        ops.PushedInbound.Clear();
+
+        // A failure from the background accept loop must surface as a connection failure
+        // (routing to reconnect), not vanish as an unobserved task exception.
+        sm.Dispatch(new AcceptLoopFailed(new IOException("accept loop failed")));
+
+        Assert.Contains(ops.PushedInbound, m => m is TransportDisconnected);
+    }
+
+    [Fact(Timeout = 5000)]
     public void HandlePush_ConnectTransport_should_schedule_connect_timeout()
     {
         var ops = new StubOps();

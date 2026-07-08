@@ -48,6 +48,15 @@ public sealed class QuicTransportEventSpec
     }
 
     [Fact(Timeout = 5000)]
+    public void AcceptLoopFailed_should_carry_error()
+    {
+        var error = new IOException("accept loop failed");
+        var evt = new AcceptLoopFailed(error);
+
+        Assert.Same(error, evt.Error);
+    }
+
+    [Fact(Timeout = 5000)]
     public void StreamReceiveCompleted_should_carry_State_and_Buffer()
     {
         var state = QuicStreamState.Rent(StreamDirection.Bidirectional, null);
