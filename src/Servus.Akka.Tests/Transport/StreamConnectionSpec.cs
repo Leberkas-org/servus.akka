@@ -396,6 +396,67 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
     }
 
     [Fact(Timeout = 5000)]
+    public async Task Multi_batch_teardown_should_release_all_queued_bytes_back_to_zero()
+    {
+        // Regression for the accounting gap: enqueue MORE than one send-batch's worth of items (100 >
+        // MaxBatchSize of 64) into a byte-capped quic-aware connection whose send loop is gated, then let
+        // it drain into a stream whose write throws a teardown exception. The send loop reads the first
+        // 64-item batch and faults on write (teardown catch releases those 64), leaving 36 items still in
+        // the channel — those MUST be released by the finally leftover-drain, not leaked. The queued-byte
+        // counter has to land exactly back at 0, or the (private) invariant "counter only reflects
+        // in-flight bytes" is violated on every aborting/tearing-down multi-batch connection.
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var throwing = new ThrowOnWriteStream();
+        var connection = new StreamConnection(throwing, new TransportConnectionOptions(), quicAware: true, gate.Task);
+
+        const int itemCount = 100; // > 64 = MaxBatchSize, so >1 batch is queued before the first drain
+        for (var i = 0; i < itemCount; i++)
+        {
+            Assert.True(connection.TryEnqueue(MakeBuffer(new byte[1])));
+        }
+
+        Assert.Equal(itemCount, connection.QueuedBytesForTest);
+
+        // Release the gate and drain: WaitToReadAsync sees the queued items, the first batch's coalesced
+        // write throws (teardown), and the send loop's catch + finally run to completion before
+        // CompleteAndDrainOutputAsync's await of the send loop returns — so the assert is deterministic.
+        gate.SetResult();
+        await connection.CompleteAndDrainOutputAsync();
+
+        Assert.Equal(0, connection.QueuedBytesForTest);
+
+        await connection.DisposeAsync();
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task Dispose_while_write_in_flight_should_release_all_queued_bytes_back_to_zero()
+    {
+        // The other leftover path: the send loop reads the first batch and parks inside WriteAsync, which
+        // blocks until its CancellationToken fires. DisposeAsync cancels the lifetime CTS (that same
+        // token) so the in-flight write throws OperationCanceledException into the teardown catch (which
+        // releases the CURRENT batch), leaving the still-queued remainder (>1 batch total) for the finally
+        // leftover-drain. DisposeAsync awaits the send loop, so once it returns the counter has settled.
+        var blocking = new BlockOnWriteStream();
+        var connection = new StreamConnection(blocking, new TransportConnectionOptions(), quicAware: true);
+
+        const int itemCount = 100; // > 64 = MaxBatchSize
+        for (var i = 0; i < itemCount; i++)
+        {
+            Assert.True(connection.TryEnqueue(MakeBuffer(new byte[1])));
+        }
+
+        Assert.Equal(itemCount, connection.QueuedBytesForTest);
+
+        // Wait until the first batch is engaged in a (blocked) write, guaranteeing a real
+        // current-batch-in-catch + leftover-in-finally split rather than an empty-batch teardown.
+        await blocking.WaitForWriteStartedAsync().WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        await connection.DisposeAsync();
+
+        Assert.Equal(0, connection.QueuedBytesForTest);
+    }
+
+    [Fact(Timeout = 5000)]
     public async Task TryEnqueue_after_completion_on_bounded_channel_should_return_false_without_logging()
     {
         var options = new TransportConnectionOptions { OutboundQueuedByteCap = 2 };
@@ -553,6 +614,70 @@ public sealed class StreamConnectionSpec : IAsyncLifetime
         Assert.Equal(2, recording.WriteCount);
         Assert.Equal(1, recording.FlushCount);
         Assert.Equal(expected, recording.Written);
+    }
+
+    /// <summary>
+    /// Write-throwing stream: every <see cref="WriteAsync(ReadOnlyMemory{byte}, CancellationToken)"/>
+    /// throws an <see cref="IOException"/> (a teardown-classified error). Drives the send loop's teardown
+    /// catch on the first batch so a test can verify the finally leftover-drain releases the still-queued
+    /// remainder of a multi-batch enqueue.
+    /// </summary>
+    private sealed class ThrowOnWriteStream : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => throw new IOException("write failed");
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => throw new IOException("write failed");
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public override void Flush() { }
+        public override void Write(byte[] buffer, int offset, int count) => throw new IOException("write failed");
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+    }
+
+    /// <summary>
+    /// Write-blocking stream: <see cref="WriteAsync(ReadOnlyMemory{byte}, CancellationToken)"/> parks until
+    /// its <see cref="CancellationToken"/> fires (then throws <see cref="OperationCanceledException"/>, a
+    /// teardown-classified error), signalling <see cref="WaitForWriteStartedAsync"/> once engaged. Lets a
+    /// test hold the first batch in-flight while <c>DisposeAsync</c> cancels the lifetime token, exercising
+    /// the current-batch-in-catch + leftover-in-finally release split deterministically.
+    /// </summary>
+    private sealed class BlockOnWriteStream : Stream
+    {
+        private readonly TaskCompletionSource _writeStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task WaitForWriteStartedAsync() => _writeStarted.Task;
+
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+
+        public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _writeStarted.TrySetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => WriteAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public override void Flush() { }
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
     }
 
     /// <summary>

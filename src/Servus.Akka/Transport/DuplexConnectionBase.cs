@@ -35,6 +35,14 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
 
     protected int ReceiveHint => _receiveHint;
 
+    /// <summary>
+    /// Test-only view of the outstanding outbound queued-byte counter (bytes reserved by
+    /// <see cref="TryEnqueue"/> minus bytes released once the send loop drains their buffers). Must land
+    /// back at 0 once a connection has fully torn down / aborted, regardless of how many batches were
+    /// queued. Read via <see cref="Interlocked"/> for a coherent snapshot across the I/O thread.
+    /// </summary>
+    internal long QueuedBytesForTest => Interlocked.Read(ref _queuedBytes);
+
     /// <param name="queuedByteCap">
     /// Outbound queued-bytes cap. <c>&lt;= 0</c> disables the cap (TCP — shared by H2/H1 whose in-flight
     /// byte count legitimately has no comparable tight bound). A positive value tracks bytes enqueued via
@@ -193,10 +201,14 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
     protected abstract ValueTask<int> WriteBatchAsync(List<WireBuffer> batch, CancellationToken ct);
 
     /// <summary>
-    /// Releases bytes previously reserved by <see cref="TryEnqueue"/> once the send loop has drained them
-    /// (written, aborted, or torn down) — the same producer/send-loop cross-thread counter, so
-    /// <see cref="Interlocked"/> is required. No-op when the byte cap is disabled (<c>_queuedByteCap &lt;= 0</c>,
-    /// e.g. TCP), keeping that path free of the extra atomic op.
+    /// Releases bytes previously reserved by <see cref="TryEnqueue"/> once the send loop has drained the
+    /// owning buffers — the same producer/send-loop cross-thread counter, so <see cref="Interlocked"/> is
+    /// required. Called from every drain path: after a normal <see cref="WriteBatchAsync"/>, on the
+    /// <see cref="ShouldAbortSendLoop"/> abort branch (current batch), in the teardown catch (current
+    /// batch), and in the send-loop <c>finally</c> for any items still queued when the loop exited (the
+    /// abort branch's remainder, and buffers left behind when <see cref="DisposeAsync"/> cancels the
+    /// lifetime CTS before completing the writer). No-op when the byte cap is disabled
+    /// (<c>_queuedByteCap &lt;= 0</c>, e.g. TCP), keeping that path free of the extra atomic op.
     /// </summary>
     private void ReleaseQueuedBytes(int bytes)
     {
@@ -288,10 +300,19 @@ internal abstract class DuplexConnectionBase : IDuplexConnection, IValueTaskSour
         }
         finally
         {
+            // Single-sourced release for every item that left the channel without going through the
+            // normal-write / abort / teardown-catch release above: the abort branch's `break` and a
+            // cancellation-during-WaitToReadAsync both land here with items still queued (the abort
+            // branch only pulled the CURRENT batch; DisposeAsync cancels the lifetime CTS before the
+            // writer is completed). Accumulate their bytes and release once so _queuedBytes lands at 0.
+            var leftoverBytes = 0;
             while (reader.TryRead(out var leftover))
             {
+                leftoverBytes += leftover.Length;
                 leftover.Dispose();
             }
+
+            ReleaseQueuedBytes(leftoverBytes);
         }
     }
 
