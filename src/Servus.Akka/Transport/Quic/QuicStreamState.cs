@@ -115,19 +115,6 @@ internal sealed class QuicStreamState : IAsyncDisposable
         ReadArmed = false;
     }
 
-    /// <summary>
-    /// Wires the attached <see cref="StreamConnection"/>'s wire-flush callback so the lifecycle can Tell a
-    /// <see cref="StreamSendFlushed"/> event without this type exposing <c>_connection</c> directly. A
-    /// no-op before <see cref="AttachConnection"/> (nothing to wire yet).
-    /// </summary>
-    internal void SetFlushCallback(Action<int> onFlushed)
-    {
-        if (_connection is not null)
-        {
-            _connection.OnFlushed = onFlushed;
-        }
-    }
-
     public async ValueTask DisposeAndReturnAsync()
     {
         // Quiesce the inbound side first: this awaits the settlement of any in-flight receive (its buffer
@@ -159,7 +146,7 @@ internal sealed class QuicStreamState : IAsyncDisposable
         Phase = StreamPhase.Active;
     }
 
-    public void AttachConnection(Stream stream, long rawStreamId = 0)
+    public void AttachConnection(Stream stream, long rawStreamId = 0, Action<int>? onFlushed = null)
     {
         _stream = stream;
         _streamId = rawStreamId;
@@ -168,6 +155,12 @@ internal sealed class QuicStreamState : IAsyncDisposable
         // receive hint comes from the transport options (closing the old hardcoded 4 KB); the adaptive
         // hint lives inside the connection.
         _connection = new StreamConnection(stream, _options ?? new TransportConnectionOptions(), quicAware: true);
+
+        // Wire the wire-flush callback BEFORE draining the deferred opening buffers below: the connection's
+        // send loop starts immediately, so any buffer enqueued here can be flushed by that loop before this
+        // method returns. Assigning OnFlushed first guarantees the first opening batch's flush ack is never
+        // dropped by a still-null callback (R4 / H6 outbound-credit-leak regression).
+        _connection.OnFlushed = onFlushed;
 
         if (_openingBuffer is not null)
         {

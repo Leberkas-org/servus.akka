@@ -409,6 +409,74 @@ public sealed class QuicStreamStateSpec
         Assert.False(state.IsAttached);
     }
 
+    [Fact(Timeout = 5000)]
+    public async Task AttachConnection_should_wire_flush_callback_before_draining_opening_buffers()
+    {
+        // R4 regression (H6): AttachConnection must install the wire-flush callback BEFORE it drains the
+        // deferred opening buffers into the freshly-created StreamConnection. The connection's send loop
+        // starts immediately, so if the callback were wired only after the drain (the old two-step
+        // AttachConnection + separate SetFlushCallback ordering used by QuicStreamLifecycle), the loop
+        // could flush that first opening batch while OnFlushed is still null — the flush ack for those
+        // bytes is swallowed by the null-callback `?.`, permanently leaking that outbound credit and
+        // potentially stalling the stream on its very first write.
+        var state = QuicStreamState.Rent(StreamDirection.Bidirectional, new TransportConnectionOptions());
+
+        // Queue an opening buffer BEFORE attach so it lands in _openingBuffer and is drained by
+        // AttachConnection (Write returns false while there is no connection == deferred).
+        var payload = WireBuffer.Rent(128);
+        payload.Length = 128;
+        Assert.False(state.Write(payload));
+
+        var flushSignaled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var ack = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        state.AttachConnection(new FlushSignalingStream(flushSignaled), rawStreamId: 4,
+            onFlushed: bytes => ack.TrySetResult(bytes));
+
+        // Deterministic sync point: the send loop has drained and flushed the opening batch to the
+        // transport. If the callback was dropped, this proves it was a genuine flush, not merely a slow one.
+        await flushSignaled.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+
+        // With the callback wired before the drain, that first flush's ack MUST have been delivered.
+        // Without the fix (OnFlushed still null at flush time) the ack is dropped and this await times out.
+        var flushedBytes = await ack.Task.WaitAsync(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
+        Assert.Equal(128, flushedBytes);
+
+        await state.DisposeAsync();
+    }
+
+    /// <summary>
+    /// Write-sink stream that signals a <see cref="TaskCompletionSource"/> the first time the send loop
+    /// flushes a batch, so the opening-buffer flush can be awaited deterministically before asserting the
+    /// flush ack was delivered.
+    /// </summary>
+    private sealed class FlushSignalingStream(TaskCompletionSource flushed) : Stream
+    {
+        public override bool CanRead => false;
+        public override bool CanSeek => false;
+        public override bool CanWrite => true;
+        public override long Length => 0;
+        public override long Position { get => 0; set { } }
+
+        public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            => ValueTask.CompletedTask;
+
+        public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public override Task FlushAsync(CancellationToken cancellationToken)
+        {
+            flushed.TrySetResult();
+            return Task.CompletedTask;
+        }
+
+        public override void Flush() => flushed.TrySetResult();
+        public override int Read(byte[] buffer, int offset, int count) => 0;
+        public override void Write(byte[] buffer, int offset, int count) { }
+        public override long Seek(long offset, SeekOrigin origin) => 0;
+        public override void SetLength(long value) { }
+    }
+
     /// <summary>Read parks forever until the receive is cancelled; write is a no-op sink.</summary>
     private sealed class BlockingStream : Stream
     {

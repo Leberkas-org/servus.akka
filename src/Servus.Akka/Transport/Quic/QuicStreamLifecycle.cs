@@ -104,11 +104,14 @@ internal sealed class QuicStreamLifecycle
             return;
         }
 
-        state.AttachConnection(stream, rawStreamId);
-
+        // Wire the per-stream wire-flush callback as part of AttachConnection so it is installed on the
+        // StreamConnection BEFORE the deferred opening buffers are drained into it — otherwise the send
+        // loop could flush that first batch while OnFlushed is still null, silently dropping its
+        // MultiplexedDataFlushed ack and permanently leaking that outbound credit (R4 / H6 regression).
         var leaseEpoch = state.Epoch;
         var leaseStreamId = streamId.Value;
-        state.SetFlushCallback(bytes => _self.Tell(new StreamSendFlushed(leaseStreamId, bytes, leaseEpoch)));
+        state.AttachConnection(stream, rawStreamId,
+            bytes => _self.Tell(new StreamSendFlushed(leaseStreamId, bytes, leaseEpoch)));
 
         if (state.Direction == StreamDirection.Bidirectional)
         {
@@ -125,12 +128,14 @@ internal sealed class QuicStreamLifecycle
             ? StreamDirection.Unidirectional
             : StreamDirection.Bidirectional;
         var state = QuicStreamState.Rent(direction, options);
-        state.AttachConnection(stream, rawStreamId);
-        _streams[streamId] = state;
 
+        // Wire the flush callback via AttachConnection (before the opening-buffer drain) — see the note in
+        // OnStreamLeaseAcquired: a post-attach wiring races the send loop's first flush (R4 / H6).
         var acceptEpoch = state.Epoch;
         var acceptStreamId = streamId.Value;
-        state.SetFlushCallback(bytes => _self.Tell(new StreamSendFlushed(acceptStreamId, bytes, acceptEpoch)));
+        state.AttachConnection(stream, rawStreamId,
+            bytes => _self.Tell(new StreamSendFlushed(acceptStreamId, bytes, acceptEpoch)));
+        _streams[streamId] = state;
 
         _ops.OnPushInbound(new ServerStreamAccepted(streamId, direction));
         RequestStreamRead(streamId);
@@ -138,7 +143,7 @@ internal sealed class QuicStreamLifecycle
 
     /// <summary>
     /// Handles a real per-stream wire flush (<see cref="StreamSendFlushed"/>, wired via
-    /// <see cref="QuicStreamState.SetFlushCallback"/>) by pushing the ack inbound as
+    /// <see cref="QuicStreamState.AttachConnection"/>) by pushing the ack inbound as
     /// <see cref="MultiplexedDataFlushed"/>. Dropped if <paramref name="epoch"/> no longer matches the
     /// stream's current <see cref="QuicStreamState.Epoch"/> — the slot was torn down and repooled for a
     /// NEW stream by the time this flush was Told back to the actor.
