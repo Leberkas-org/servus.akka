@@ -6,7 +6,12 @@ internal sealed class QuicConnectionLease : IAsyncDisposable
     private readonly long _createdTicks;
     private readonly int _maxConcurrentStreams;
     private readonly TimeSpan _idleTimeout;
-    private bool _alive = true;
+
+    // 1 = alive, 0 = disposed. Read/written with Interlocked so the idempotency guard is atomic: the
+    // lease is disposed from two different actors (consumer transport state machine + pool manager)
+    // on different threads, so a plain check-then-set bool would let both pass the guard and dispose
+    // the underlying handle twice. Interlocked is appropriate here — a genuine cross-actor boundary.
+    private int _alive = 1;
 
     public QuicConnectionLease(QuicConnectionHandle handle, int maxConcurrentStreams, TimeProvider? timeProvider = null,
         TimeSpan idleTimeout = default)
@@ -25,7 +30,7 @@ internal sealed class QuicConnectionLease : IAsyncDisposable
 
     public DateTime LastActivity { get; private set; }
 
-    public bool IsAlive() => _alive;
+    public bool IsAlive() => Volatile.Read(ref _alive) == 1;
 
     public bool IsExpired(TimeSpan maxLifetime)
     {
@@ -37,7 +42,7 @@ internal sealed class QuicConnectionLease : IAsyncDisposable
         return _clock.GetUtcNow().ToUnixTimeMilliseconds() - _createdTicks > (long)maxLifetime.TotalMilliseconds;
     }
 
-    public bool CanAcceptStream() => _alive && !IsIdleClosed() && ActiveStreams < _maxConcurrentStreams;
+    public bool CanAcceptStream() => Volatile.Read(ref _alive) == 1 && !IsIdleClosed() && ActiveStreams < _maxConcurrentStreams;
 
     // Heuristic: MsQuic silently closes a connection after its negotiated idle timeout, but the lease is
     // not notified — _alive stays true and the pool would hand out a dead connection (the next
@@ -69,12 +74,11 @@ internal sealed class QuicConnectionLease : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        if (!_alive)
+        if (Interlocked.Exchange(ref _alive, 0) == 0)
         {
             return;
         }
 
-        _alive = false;
         await Handle.DisposeAsync().ConfigureAwait(false);
     }
 }

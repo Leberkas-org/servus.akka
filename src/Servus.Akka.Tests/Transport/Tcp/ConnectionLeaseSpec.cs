@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Servus.Akka.Transport;
 using Servus.Akka.Transport.Tcp;
 
@@ -115,5 +116,77 @@ public sealed class ConnectionLeaseSpec
         lease.Dispose();
 
         Assert.False(lease.IsAlive());
+    }
+
+    // Reproduces the cross-actor double-dispose race (race-audit finding #2, M2): the consumer
+    // state-machine actor and the pool-manager actor both call Dispose() on the SAME lease from
+    // different threads. With a non-atomic `_alive` check-then-set both callers can pass the guard
+    // and run the dispose body twice -> the CTS is cancelled/disposed twice (ObjectDisposedException
+    // out of the second Cancel) AND the connection is disposed twice. The window is a couple of IL
+    // instructions, so many racing leases are exercised to make the collision certain; the pass/fail
+    // outcome is deterministic (an atomically-idempotent guard NEVER double-runs the body, a
+    // non-atomic one eventually does).
+    [Fact(Timeout = 30000)]
+    public async Task Concurrent_dispose_from_two_paths_runs_the_body_exactly_once()
+    {
+        const int leaseCount = 1000;
+        var threadsPerLease = Math.Max(4, Environment.ProcessorCount);
+        var totalBodyRuns = 0;
+        var failures = new ConcurrentQueue<Exception>();
+
+        for (var i = 0; i < leaseCount; i++)
+        {
+            var connection = new CountingConnection();
+            var cts = new CancellationTokenSource();
+            var lease = new ConnectionLease(connection, cts, ConnectionInfo.None);
+
+            using var barrier = new Barrier(threadsPerLease);
+            var tasks = new Task[threadsPerLease];
+            for (var t = 0; t < threadsPerLease; t++)
+            {
+                tasks[t] = Task.Run(() =>
+                {
+                    barrier.SignalAndWait();
+                    try
+                    {
+                        lease.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Enqueue(ex);
+                    }
+                });
+            }
+
+            await Task.WhenAll(tasks);
+            totalBodyRuns += connection.DisposeCount;
+        }
+
+        Assert.True(failures.IsEmpty,
+            $"Dispose threw during a concurrent double-dispose: {failures.FirstOrDefault()}");
+        Assert.Equal(leaseCount, totalBodyRuns);
+    }
+
+    private sealed class CountingConnection : IDuplexConnection
+    {
+        private int _disposeCount;
+
+        public int DisposeCount => Volatile.Read(ref _disposeCount);
+
+        public Action<int>? OnFlushed { get; set; }
+
+        public ValueTask<WireBuffer?> ReceiveAsync() => throw new NotSupportedException();
+
+        public bool TryEnqueue(WireBuffer buffer) => throw new NotSupportedException();
+
+        public ValueTask<bool> QuiesceAsync() => throw new NotSupportedException();
+
+        public Task CompleteAndDrainOutputAsync() => throw new NotSupportedException();
+
+        public ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCount);
+            return ValueTask.CompletedTask;
+        }
     }
 }

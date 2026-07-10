@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Servus.Akka.Transport.Quic;
 using Servus.Akka.Transport.Quic.Client;
 
@@ -281,5 +282,62 @@ public sealed class QuicConnectionLeaseSpec
         // Second dispose should not call handle.DisposeAsync again
         await lease.DisposeAsync();
         Assert.Equal(1, disposeCount);
+    }
+
+    // Reproduces the cross-actor double-dispose race (race-audit finding #2, M2): the consumer
+    // transport state-machine actor (ReturnConnectionToPool -> _ = lease.DisposeAsync()) and the
+    // pool-manager actor (OnRelease -> lease.DisposeAsync()) both dispose the SAME lease from
+    // different threads. With a non-atomic `_alive` check-then-set both can pass the guard and run
+    // the dispose body twice -> the underlying handle is disposed more than once. Many racing leases
+    // are exercised so the tiny window is hit; an atomically-idempotent guard disposes the handle
+    // EXACTLY once per lease no matter how many threads race.
+    [Fact(Timeout = 30000)]
+    public async Task Concurrent_dispose_from_two_paths_disposes_the_handle_exactly_once()
+    {
+        const int leaseCount = 1000;
+        var threadsPerLease = Math.Max(4, Environment.ProcessorCount);
+        var totalHandleDisposes = 0;
+        var failures = new ConcurrentQueue<Exception>();
+
+        for (var i = 0; i < leaseCount; i++)
+        {
+            var disposeCount = 0;
+            var handle = new QuicConnectionHandle(
+                openStream: (_, _) => Task.FromResult((Stream: (Stream)new MemoryStream(), StreamId: 0L)),
+                acceptInboundStream: _ => Task.FromResult<(Stream, long)?>(null),
+                getLocalEndPoint: () => null,
+                getRemoteEndPoint: () => null,
+                dispose: () =>
+                {
+                    Interlocked.Increment(ref disposeCount);
+                    return ValueTask.CompletedTask;
+                });
+            var lease = new QuicConnectionLease(handle, 10);
+
+            using var barrier = new Barrier(threadsPerLease);
+            var tasks = new Task[threadsPerLease];
+            for (var t = 0; t < threadsPerLease; t++)
+            {
+                tasks[t] = Task.Run(async () =>
+                {
+                    barrier.SignalAndWait();
+                    try
+                    {
+                        await lease.DisposeAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        failures.Enqueue(ex);
+                    }
+                });
+            }
+
+            await Task.WhenAll(tasks);
+            totalHandleDisposes += Volatile.Read(ref disposeCount);
+        }
+
+        Assert.True(failures.IsEmpty,
+            $"DisposeAsync threw during a concurrent double-dispose: {failures.FirstOrDefault()}");
+        Assert.Equal(leaseCount, totalHandleDisposes);
     }
 }

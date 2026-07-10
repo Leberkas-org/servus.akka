@@ -5,7 +5,12 @@ internal sealed class ConnectionLease : IDisposable
     private readonly CancellationTokenSource _cts;
     private readonly TimeProvider _clock;
     private readonly long _createdTicks;
-    private bool _alive = true;
+    // 1 = alive, 0 = disposed. Read/written with Interlocked so the idempotency guard is atomic:
+    // the lease is disposed from two different actors (consumer state machine + pool manager) on
+    // different threads, so a plain check-then-set bool would let both pass the guard and run the
+    // dispose body twice (double CTS cancel/dispose -> ObjectDisposedException, double connection
+    // dispose). Interlocked is appropriate here — a genuine cross-actor/cross-thread boundary.
+    private int _alive = 1;
     private long _idleSinceTicks = -1;
 
     internal ConnectionLease(
@@ -31,7 +36,7 @@ internal sealed class ConnectionLease : IDisposable
     /// minimal.</summary>
     public TransportConnectionOptions Options { get; }
 
-    public bool IsAlive() => _alive;
+    public bool IsAlive() => Volatile.Read(ref _alive) == 1;
 
     public bool IsExpired(TimeSpan maxLifetime)
     {
@@ -66,12 +71,11 @@ internal sealed class ConnectionLease : IDisposable
 
     public void Dispose()
     {
-        if (!_alive)
+        if (Interlocked.Exchange(ref _alive, 0) == 0)
         {
             return;
         }
 
-        _alive = false;
         _cts.Cancel();
         _cts.Dispose();
         _ = Connection.DisposeAsync();
