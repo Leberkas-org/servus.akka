@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.3.15](https://github.com/Leberkas-org/servus.akka/compare/v0.3.14...v0.3.15) (2026-10-07)
+
+
+### Features
+
+* add Func&lt;Props,Props&gt; configure hook to ResolveActor/ResolveChildActor ([cf2768a](https://github.com/Leberkas-org/servus.akka/commit/cf2768aa5fad4246a74e4e71775bf159099d4c7c))
+* add Props backoff extensions (BackoffOnFailure/BackoffOnStop) ([f07613f](https://github.com/Leberkas-org/servus.akka/commit/f07613f7318aef5e3e1d62d03ce837df5933223a))
+* Remove unused tracing extensions ([e4e5f86](https://github.com/Leberkas-org/servus.akka/commit/e4e5f862b04b525cfedb0faf2633d3adabc66f28))
+* Remove unused tracing extensions and add Servus ([#27](https://github.com/Leberkas-org/servus.akka/issues/27)) ([df3cad5](https://github.com/Leberkas-org/servus.akka/commit/df3cad56eb8381beb62db498443123a16322e025))
+
 ## [0.3.14](https://github.com/Leberkas-org/servus.akka/compare/v0.3.13...v0.3.14) (2026-06-02)
 
 
