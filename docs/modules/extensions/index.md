@@ -5,6 +5,7 @@ The root `Servus.Akka` namespace adds convenience APIs around actor registration
 ## Pages in this section
 
 - [**Register Extensions**](./register) — `WithResolvableActors` and `WithResolvableActor` on `AkkaConfigurationBuilder`.
+- [**Backoff Extensions**](./backoff) — wrap `Props` in a `BackoffSupervisor`, on-failure or on-stop.
 - [**Resolve Extensions**](./resolve) — DI-backed actor creation from `ActorSystem` or `IActorContext`.
 - [**Registry Extensions**](./registry) — typed access to `IActorRegistry` and async actor lookup.
 - [**Context Extensions**](./context) — safe child lookup and child tell/forward helpers.
@@ -14,4 +15,4 @@ The root `Servus.Akka` namespace adds convenience APIs around actor registration
 
 | Namespace | Types |
 |---|---|
-| `Servus.Akka` | `ActorRegistrationHelper`, `RegisterExtensions`, `ResolveExtensions`, `RegistryExtensions`, `ContextExtensions`, `AkkaOptionsExtensions` |
+| `Servus.Akka` | `ActorRegistrationHelper`, `RegisterExtensions`, `BackoffExtensions`, `ResolveExtensions`, `RegistryExtensions`, `ContextExtensions`, `AkkaOptionsExtensions` |

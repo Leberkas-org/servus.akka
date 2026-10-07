@@ -64,6 +64,7 @@ export default defineConfig({
           items: [
             { text: 'Overview', link: '/modules/extensions/' },
             { text: 'Register Extensions', link: '/modules/extensions/register' },
+            { text: 'Backoff Extensions', link: '/modules/extensions/backoff' },
             { text: 'Resolve Extensions', link: '/modules/extensions/resolve' },
             { text: 'Registry Extensions', link: '/modules/extensions/registry' },
             { text: 'Context Extensions', link: '/modules/extensions/context' },
