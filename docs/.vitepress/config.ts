@@ -65,6 +65,7 @@ export default defineConfig({
             { text: 'Overview', link: '/modules/extensions/' },
             { text: 'Register Extensions', link: '/modules/extensions/register' },
             { text: 'Backoff Extensions', link: '/modules/extensions/backoff' },
+            { text: 'Circuit Breaker Extensions', link: '/modules/extensions/circuit-breaker' },
             { text: 'Resolve Extensions', link: '/modules/extensions/resolve' },
             { text: 'Registry Extensions', link: '/modules/extensions/registry' },
             { text: 'Context Extensions', link: '/modules/extensions/context' },
