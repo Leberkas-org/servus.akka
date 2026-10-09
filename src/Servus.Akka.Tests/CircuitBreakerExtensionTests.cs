@@ -58,7 +58,7 @@ public class CircuitBreakerExtensionTests : TestKit
 
         actor.Tell("create");
 
-        var response = await probe.ExpectMsgAsync<BreakerCreated>();
+        var response = await probe.ExpectMsgAsync<BreakerCreated>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Multiple(
             () => Assert.Equal(5, response.Breaker.MaxFailures),
             () => Assert.True(response.Breaker.IsClosed));
@@ -141,7 +141,7 @@ public class CircuitBreakerExtensionTests : TestKit
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             breaker.WithCircuitBreaker(_ => Task.FromException<int>(new InvalidOperationException())));
 
-        AwaitCondition(() => opened, TimeSpan.FromSeconds(3));
+        AwaitCondition(() => opened, TimeSpan.FromSeconds(3), TestContext.Current.CancellationToken);
         Assert.True(breaker.IsOpen);
     }
 
@@ -151,9 +151,9 @@ public class CircuitBreakerExtensionTests : TestKit
         var breaker = Sys.CreateCircuitBreaker();
         var probe = CreateTestProbe();
 
-        breaker.WithCircuitBreaker(_ => Task.FromResult("hello")).PipeTo(probe);
+        _ = breaker.WithCircuitBreaker(_ => Task.FromResult("hello")).PipeTo(probe);
 
-        var msg = await probe.ExpectMsgAsync<string>();
+        var msg = await probe.ExpectMsgAsync<string>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.Equal("hello", msg);
     }
 
@@ -166,9 +166,9 @@ public class CircuitBreakerExtensionTests : TestKit
         await Assert.ThrowsAsync<InvalidOperationException>(() =>
             breaker.WithCircuitBreaker(_ => Task.FromException<string>(new InvalidOperationException())));
 
-        breaker.WithCircuitBreaker(_ => Task.FromResult("ignored")).PipeTo(probe);
+        _ = breaker.WithCircuitBreaker(_ => Task.FromResult("ignored")).PipeTo(probe);
 
-        var msg = await probe.ExpectMsgAsync<Status.Failure>();
+        var msg = await probe.ExpectMsgAsync<Status.Failure>(cancellationToken: TestContext.Current.CancellationToken);
         Assert.IsType<OpenCircuitException>(msg.Cause);
     }
 
