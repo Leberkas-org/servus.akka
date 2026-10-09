@@ -1,0 +1,18 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/Solution Items/">
+    <File Path="../.github/workflows/ci.yml" />
+    <File Path="../.github/workflows/docs.yml" />
+    <File Path="../.github/workflows/nuget.yml" />
+    <File Path="../.github/workflows/release_please.yml" />
+    <File Path="../LICENSE" />
+    <File Path="../README.md" />
+  </Folder>
+  <Project Path="Servus.Akka.Samples.WebApi/Servus.Akka.Samples.WebApi.csproj" />
+  <Project Path="Servus.Akka.Tests/Servus.Akka.Tests.csproj" />
+  <Project Path="Servus.Akka/Servus.Akka.csproj" />
+</Solution>
