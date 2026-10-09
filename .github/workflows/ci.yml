@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -17,29 +18,49 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v5
         with:
           global-json-file: ./src/global.json
 
       - name: Restore
-        run: dotnet restore ./src/Servus.Akka.sln
+        run: dotnet restore ./src/Servus.Akka.slnx
 
       - name: Build
-        run: dotnet build -c Release --no-restore ./src/Servus.Akka.sln
+        run: >
+          dotnet build
+          --configuration Release
+          --no-restore
+          ./src/Servus.Akka.slnx
 
       - name: Test
         working-directory: ./src
-        run: dotnet test -c Release --no-build --solution *.sln
+        run: >
+          dotnet test
+          --configuration Release
+          --no-ansi
+          --no-build
+          --coverage
+          --coverage-output-format xml
+          --solution Servus.Akka.slnx
+          --results-directory ./TestResults
 
       - name: Pack
         if: inputs.version != ''
-        run: dotnet pack -c Release --no-build -o ./nupkg ./src/Servus.Akka.sln -p:PackageVersion=${{ inputs.version }}
+        run: >
+          dotnet pack
+          --configuration Release
+          --no-build
+          --output ./nupkg
+          ./src/Servus.Akka.slnx
+          -p:PackageVersion=${{ inputs.version }}
 
       - name: Upload NuGet packages
         if: inputs.version != ''
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: nuget-packages
           path: ./nupkg/*.nupkg
