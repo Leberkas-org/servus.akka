@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.16](https://github.com/Leberkas-org/servus.akka/compare/v0.3.15...v0.3.16) (2026-10-11)
+
+
+### Features
+
+* add CircuitBreaker extensions (CreateCircuitBreaker on IActorContext/ActorSystem) ([0b7bc2f](https://github.com/Leberkas-org/servus.akka/commit/0b7bc2f868e0899fa663fee1909abedbd8dd0974))
+* **tests:** Pass CancellationToken to async methods ([d9d8d27](https://github.com/Leberkas-org/servus.akka/commit/d9d8d27a74b681b8e0f43c8517d754f2bf363c66))
+
 ## [0.3.15](https://github.com/Leberkas-org/servus.akka/compare/v0.3.14...v0.3.15) (2026-10-07)
 
 
