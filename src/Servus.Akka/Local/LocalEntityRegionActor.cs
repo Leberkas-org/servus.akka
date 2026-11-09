@@ -16,6 +16,7 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
     private readonly IEntityIdStore _entityIdStore;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan? _passivateAfter;
+    private readonly object _stopMessage;
 
     private readonly Dictionary<string, IActorRef> _entities = [];
     private readonly Dictionary<string, DateTime> _lastActivity = [];
@@ -37,6 +38,7 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
         _entityIdStore = options?.EntityIdStore ?? new InMemoryEntityIdStore();
         _timeProvider = options?.TimeProvider ?? TimeProvider.System;
         _passivateAfter = options?.PassivateIdleEntityAfter;
+        _stopMessage = options?.StopMessage ?? PoisonPill.Instance;
 
         Initializing();
     }
@@ -77,10 +79,10 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
 
     private void BecomeReady()
     {
-        
         Become(() =>
         {
             Receive<PassivationTick>(_ => RunPassivation());
+            Receive<Passivate>(HandlePassivate);
             Receive<Terminated>(HandleTerminated);
             Receive<Status.Failure>(f => _log.Error(f.Cause, "Entity store operation failed"));
             Receive<object>(RouteMessage);
@@ -88,6 +90,31 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
         
         Stash.UnstashAll();
         SchedulePassivation();
+    }
+
+    private void HandlePassivate(Passivate passivate)
+    {
+        var entityId = Sender.Path.Name;
+        if (!_entities.TryGetValue(entityId, out var entity) || !entity.Equals(Sender))
+        {
+            _log.Warning("Ignoring Passivate from [{0}]: only entities of this region can passivate", Sender);
+            return;
+        }
+
+        if (!_passivating.Contains(entityId))
+            BeginPassivation(entityId, entity, passivate.StopMessage, "requested by the entity");
+    }
+
+    /// <summary>
+    /// Stops delivering to the entity and asks it to stop with <paramref name="stopMessage"/>. Messages for it are
+    /// buffered until it terminated, then it is started again for them (see <see cref="HandleTerminated"/>).
+    /// </summary>
+    private void BeginPassivation(string entityId, IActorRef entity, object stopMessage, string reason)
+    {
+        _passivating.Add(entityId);
+        _entityIdStore.EntityStopped(entityId).PipeTo(Self);
+        _log.Info("Entity [{0}] passivating ({1})", entityId, reason);
+        entity.Tell(stopMessage, ActorRefs.NoSender);
     }
 
     private void RouteMessage(object message)
@@ -177,13 +204,10 @@ public class LocalEntityRegionActor : ReceiveActor, IWithUnboundedStash
 
         foreach (var entityId in toPassivate)
         {
-            if (!_entities.TryGetValue(entityId, out var actorRef))
+            if (_passivating.Contains(entityId) || !_entities.TryGetValue(entityId, out var actorRef))
                 continue;
 
-            _passivating.Add(entityId);
-            _entityIdStore.EntityStopped(entityId).PipeTo(Self);
-            _log.Info("Entity [{0}] passivating (idle for {1})", entityId, _passivateAfter);
-            Context.Stop(actorRef);
+            BeginPassivation(entityId, actorRef, _stopMessage, $"idle for {timeout}");
         }
     }
 
