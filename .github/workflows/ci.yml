@@ -19,8 +19,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
 
       - uses: actions/setup-dotnet@v5
         with:
@@ -47,6 +45,14 @@ jobs:
           --coverage-output-format xml
           --solution Servus.Akka.slnx
           --results-directory ./TestResults
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage
+          path: ./src/TestResults/**/*.xml
+          if-no-files-found: ignore
 
       - name: Pack
         if: inputs.version != ''
