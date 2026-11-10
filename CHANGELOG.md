@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.16](https://github.com/Leberkas-org/servus.akka/compare/v0.3.15...v0.3.16) (2026-11-10)
+
+
+### Features
+
+* add CircuitBreaker extensions (CreateCircuitBreaker on IActorContext/ActorSystem) ([0b7bc2f](https://github.com/Leberkas-org/servus.akka/commit/0b7bc2f868e0899fa663fee1909abedbd8dd0974))
+* **tests:** Pass CancellationToken to async methods ([d9d8d27](https://github.com/Leberkas-org/servus.akka/commit/d9d8d27a74b681b8e0f43c8517d754f2bf363c66))
+
+
+### Bug Fixes
+
+* actor ref provider returns null, works in scopes, keyed, disposes ([8f8e3b3](https://github.com/Leberkas-org/servus.akka/commit/8f8e3b338d790b5228ec4f6b32dc2071600898da))
+* passivate entities with a stop message and support Passivate ([e72933d](https://github.com/Leberkas-org/servus.akka/commit/e72933d07b23d37aea5996aea53de286124d8155))
+
 ## [0.3.15](https://github.com/Leberkas-org/servus.akka/compare/v0.3.14...v0.3.15) (2026-10-07)
 
 
